@@ -25,6 +25,7 @@ var formDatesHeader = 'Which days are you NOT available? If re-submitting, pleas
 var formCommentsHeader = 'Comments(optional)';
 
 var headerRowIndex = 13;
+var dateRowIndex = 1;
 
 var sheetsNameHeader = 'Name';
 var sheetsRolesHeader = 'Roles';
@@ -42,49 +43,67 @@ function updateDatabase(e) {
     var databaseSheet = databaseSS.getSheetByName(ministrySheetName);
     var databaseData = databaseSheet.getDataRange().getValues();
 
-    // Log the event object to understand its structure
-    Logger.log(JSON.stringify(e));
+    Logger.log('--- STARTING UPDATE DATABASE ---');
+    Logger.log('Event Data: ' + JSON.stringify(e));
 
     // Extract form responses using namedValues
     var responses = e.namedValues;
     var name = responses[formNameHeader];
-    // var roles = responses['Select Your Roles'];
     var timesWilling = responses[formTimesHeader];
-    var unavailableDates = responses[formDatesHeader]
-      ? responses[formDatesHeader].map(function(dateStr) {
-      // Remove " - Corporate Prayer" if it exists
-      var cleanStr = dateStr.replace(' - Corporate Prayer', '').trim();
 
-      // If it's not a Corporate Prayer date, format to MM/dd
-      var date = new Date(cleanStr);
-      if (!isNaN(date.getTime())) {
-        var mm = ('0' + (date.getMonth() + 1)).slice(-2);
-        var dd = ('0' + date.getDate()).slice(-2);
-        return mm + '/' + dd;
-      }
+    var unavailableDates = [];
+    var rawDates = responses[formDatesHeader];
 
-      // Fallback for unparseable or intentionally excluded strings
-      return cleanStr;
-    })
-  : [];
+    if (rawDates && rawDates.length > 0) {
+      Logger.log('Raw Unavailable Dates from Form: ' + rawDates[0]);
+
+      // 1. Split the single string response (rawDates[0]) into an array of individual date strings.
+      unavailableDates = rawDates[0].split(',').map(function(dateStr, index) {
+
+        // Logger.log('Processing item ' + index + ': ' + dateStr.trim());
+
+        // 2. Use regex to remove ' - ' followed by any string to the end of the date item.
+        // Also trim any leading/trailing spaces from the split process.
+        var cleanStr = dateStr.replace(/\s-\s.*$/, '').trim();
+
+        // Logger.log('  -> Cleaned String: ' + cleanStr);
+
+        // 3. Convert to Date object to ensure format is MM/dd (and handle potential variations)
+        var date = new Date(cleanStr);
+        if (!isNaN(date.getTime())) {
+          var mm = ('0' + (date.getMonth() + 1)).slice(-2);
+          var dd = ('0' + date.getDate()).slice(-2);
+          var finalDate = mm + '/' + dd;
+          // Logger.log('  -> Final MM/dd Date: ' + finalDate);
+          return finalDate;
+        }
+
+        // Fallback for unparseable strings (should be rare)
+        Logger.log('  -> Fallback returned (unparseable): ' + cleanStr);
+        return cleanStr;
+      });
+    }
+
+    var unavailableDatesString = unavailableDates.join(','); // Prepare for storage
     var comments = responses[formCommentsHeader];
 
-    // Log extracted values for debugging
+    // Log final extracted values before database write
     Logger.log('Name: ' + name);
-    // Logger.log('Roles: ' + roles);
     Logger.log('Times Willing to Serve: ' + timesWilling);
-    Logger.log('Unavailable Dates: ' + unavailableDates);
-    Logger.log('Comments: ') + comments;
+    Logger.log('Parsed Unavailable Dates: ' + unavailableDatesString);
+    Logger.log('Comments: ' + comments);
+    
+    // --- Database Update Logic ---
 
     var found = false;
     for (var i = 1; i < databaseData.length; i++) {
       if (databaseData[i][0] == name) {
         // Update the corresponding row
-        // databaseSheet.getRange(i + 1, 2).setValue(roles);
         databaseSheet.getRange(i + 1, 3).setValue(timesWilling);
-        databaseSheet.getRange(i + 1, 4).setValue(unavailableDates);
+        databaseSheet.getRange(i + 1, 4).setValue(unavailableDatesString); // Use the joined string
         databaseSheet.getRange(i + 1, 5).setValue(comments);
         found = true;
+        Logger.log('Updated existing row ' + (i + 1) + ' for ' + name);
         break;
       }
     }
@@ -93,61 +112,16 @@ function updateDatabase(e) {
       // If no match is found, append a new row
       var lastRow = databaseSheet.getLastRow() + 1;
       databaseSheet.getRange(lastRow, 1).setValue(name);
-      // databaseSheet.getRange(lastRow, 2).setValue(roles);
       databaseSheet.getRange(lastRow, 3).setValue(timesWilling);
       databaseSheet.getRange(lastRow, 4).setValue(unavailableDatesString);
       databaseSheet.getRange(lastRow, 5).setValue(comments);
+      Logger.log('Added new row ' + lastRow + ' for ' + name);
     }
   } catch (error) {
-    Logger.log('Error in updateDatabase: ' + error.message);
+    Logger.log('!!! ERROR in updateDatabase: ' + error.message);
   }
   updateAvailability();
-  Logger.log('Updated availability')
-}
-
-function getFormResponses() {
-  var metadataSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Form Metadata");
-  if (!metadataSheet) return [];
-  var formId = metadataSheet.getRange("B2").getValue();
-  if (!formId) return [];
-
-  var form = FormApp.openById(formId);
-  var responses = form.getResponses();
-
-  var result = [];
-  responses.forEach(function(response) {
-    var itemResponses = response.getItemResponses();
-    var responseData = {
-      name: '',
-      // roles: [],
-      times: '',
-      unavailableDates: []
-    };
-
-    itemResponses.forEach(function(itemResponse) {
-      var title = itemResponse.getItem().getTitle();
-      var answer = itemResponse.getResponse();
-
-      switch (title) {
-        case formNameHeader:
-          responseData.name = answer;
-          break;
-        // case 'Select Your Roles':
-        //   responseData.roles = Array.isArray(answer) ? answer : [answer];
-        //   break;
-        case formTimesHeader:
-          responseData.times = answer;
-          break;
-        case formDatesHeader:
-          responseData.unavailableDates = Array.isArray(answer) ? answer : [answer];
-          break;
-      }
-    });
-
-    result.push(responseData);
-  });
-
-  return result;
+  Logger.log('Updated availability and finished execution.');
 }
 
 function getServiceDates(year, month) {
@@ -526,11 +500,11 @@ function findFormResponseSheet() {
 function updateAvailability() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
 
+  Logger.log('--- STARTING updateAvailability ---');
+
   var today = new Date();
   var planDate = new Date(today);
   planDate.setMonth(today.getMonth() + 1);
-  var planYear = planDate.getFullYear();
-  var planMonth = planDate.getMonth();
   var planMonthName = planDate.toLocaleString('default', { month: 'long' });
   var sheetName = planMonthName + " Availability";
 
@@ -549,9 +523,27 @@ function updateAvailability() {
     return;
   }
 
-  // Define the service days
-  var serviceDates = getServiceDates(planYear, planMonth);
-  var dateHeaders = serviceDates;
+  // Get Date Headers from the sheet (Row 1, starting from column 2)
+  var lastCol = matrixSheet.getLastColumn();
+  if (lastCol <= 1) {
+    Logger.log("Error: Availability matrix has no date columns.");
+    return;
+  }
+  var headerRowValues = matrixSheet.getRange(1, 2, 1, lastCol - 1).getValues();
+  var dateHeaders = headerRowValues[0];
+  Logger.log('Matrix Date Headers (Raw): ' + dateHeaders.join(', '));
+
+  var lastCol = matrixSheet.getLastColumn();
+
+  var dateHeaders = matrixSheet
+    .getRange(dateRowIndex, 2, 1, lastCol - 1)
+    .getDisplayValues()[0];
+
+  var serviceDateKeys = dateHeaders.map(function(h) {
+    return String(h).trim().substring(0, 5);
+  });
+
+  Logger.log('Standardized Date Keys: ' + serviceDateKeys.join(', '));
 
   // Initialize the availability object
   var availability = {};
@@ -564,27 +556,34 @@ function updateAvailability() {
   for (var i = 1; i < databaseData.length; i++) {
     var row = databaseData[i];
     var name = row[0] ? row[0].trim() : "";
+    
+    if (!name) continue; 
+    
     var roles = row[1]
       ? row[1].toString().split(",").map(function(role) {
           return role.trim().toUpperCase();
         })
       : [];
     var timesWilling = row[2] ? row[2].toString().trim() : "";
-    var unavailableDates = row[3]
-      ? row[3].toString().split(",").map(function(dateStr) {
-      var parsedDate = new Date(dateStr.trim());
+    var rawUnavailableDates = row[3] ? row[3].toString() : "";
+    
+    var unavailableDates = rawUnavailableDates
+      ? rawUnavailableDates.split(",").map(function(dateStr) {
+      var trimmedDateStr = dateStr.trim();
+      var parsedDate = new Date(trimmedDateStr);
+      
       if (!isNaN(parsedDate.getTime())) {
         var mm = ('0' + (parsedDate.getMonth() + 1)).slice(-2);
         var dd = ('0' + parsedDate.getDate()).slice(-2);
         return mm + '/' + dd;
       } else {
         // Fallback: just take the first 5 characters (e.g., "MM/dd") if parse fails
-        return dateStr.trim().substring(0, 5);
+        return trimmedDateStr.substring(0, 5);
       }
     })
   : [];
 
-    if (!name || !roles.length) continue; // Skip rows with missing name or roles
+    if (!name || !roles.length) continue;
 
     // Format the name as "Firstname L."
     var nameParts = name.split(" ");
@@ -592,46 +591,33 @@ function updateAvailability() {
       name = nameParts[0] + " " + nameParts[1].charAt(0).toUpperCase() + ".";
     }
 
-  // If "Times Willing to Serve" is blank, mark unavailable for all dates
-  var isUnavailableAllMonth = timesWilling === "";
+    // If "Times Willing to Serve" is blank, mark unavailable for all dates
+    var isUnavailableAllMonth = timesWilling === "";
 
-  // Clear the old values from the matrix (excluding headers)
-  var numRoles = roleOrder.length;
-  var clearRange = matrixSheet.getRange(headerRowIndex, 2, numRoles, dateHeaders.length);
-  clearRange.clearContent();
-
-  // Update the availability matrix in the sheet
-  var roleRowIndex = headerRowIndex;
-  roleOrder.forEach(function(role) {
-    var roleData = availability[role];
-    if (roleData) {
-      var namesRow = dateHeaders.map(function(date) {
-        return roleData[date] ? roleData[date].join("\n") : "";
+    roles.forEach(function(role) {
+      if (!availability[role]) availability[role] = {};
+      
+      // *** Use serviceDateKeys for reliable matching ***
+      serviceDateKeys.forEach(function(dateKey) {
+        
+        // dateKey is the clean "MM/dd" string (e.g., "12/14")
+        var date = dateKey; 
+        
+        if (!availability[role][date]) availability[role][date] = [];
+        
+        // Add name if not marked unavailable for all dates and not in unavailableDates
+        // Comparison is now guaranteed to work: "12/14" === "12/14"
+        if (!isUnavailableAllMonth && !unavailableDates.includes(date)) {
+          availability[role][date].push(name);
+        }
       });
-      var range = matrixSheet.getRange(roleRowIndex, 2, 1, namesRow.length);
-      range.setValues([namesRow]);
-      range.setWrap(false); // Disable text wrapping for the range
-      roleRowIndex++;
-    }
-  });
-
-  roles.forEach(function(role) {
-    if (!availability[role]) availability[role] = {};
-    dateHeaders.forEach(function(dateHeader) {
-      // Extract 'MM/dd' from the date header
-      var date = dateHeader.substring(0, 5).trim();
-      if (!availability[role][date]) availability[role][date] = [];
-      // Add name if not marked unavailable for all dates and not in unavailableDates
-      if (!isUnavailableAllMonth && !unavailableDates.includes(date)) {
-        availability[role][date].push(name);
-      }
     });
-  });
-  }
+  } // End of main database iteration loop
 
-  // Clear the old values from the matrix (excluding headers)
+  // Clear the old values from the matrix (excluding headers) - Run once
   var numRoles = roleOrder.length;
-  var clearRange = matrixSheet.getRange(headerRowIndex, 2, numRoles, dateHeaders.length);
+  // Use serviceDateKeys.length to define the range width
+  var clearRange = matrixSheet.getRange(headerRowIndex, 2, numRoles, serviceDateKeys.length); 
   clearRange.clearContent();
 
   // Update the availability matrix in the sheet
@@ -639,12 +625,9 @@ function updateAvailability() {
   roleOrder.forEach(function(role) {
     var roleData = availability[role];
     if (roleData) {
-      var namesRow = dateHeaders.map(function(dateHeader) {
-        // Remove " - Corporate Prayer" from dateHeader to match the availability object
-        var date = dateHeader.split(' -')[0].trim();
-
-        // Return names for the role and date, if available
-        return roleData[date] ? roleData[date].join("\n") : "";
+      var namesRow = serviceDateKeys.map(function(dateKey) {
+        // dateKey is the clean "MM/dd" string, used as the lookup key
+        return roleData[dateKey] ? roleData[dateKey].join("\n") : "";
       });
       
       // Set values in the sheet
@@ -658,4 +641,5 @@ function updateAvailability() {
   matrixSheet.autoResizeColumns(1, matrixSheet.getLastColumn() - 1);
   matrixSheet.autoResizeRows(headerRowIndex, roleRowIndex - headerRowIndex + 1);
   Logger.log("Availability matrix updated in sheet: " + sheetName);
+  Logger.log('--- FINISHED updateAvailability ---');
 }
