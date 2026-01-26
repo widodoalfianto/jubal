@@ -1,7 +1,7 @@
 /**
  * End-to-End Testing Suite
  * 
- * This file contains tests to verify the full workflow of the Ministry Scheduler.
+ * This file contains tests to verify the full workflow of Jubal.
  * It is intended to be excluded from production deployments via .gitignore.
  * 
  * Usage: Run runFullSystemTest() from the Apps Script editor.

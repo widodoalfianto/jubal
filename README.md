@@ -1,4 +1,4 @@
-# 📅 ministryScheduler
+# 🎵 Jubal
 
 This repository contains the Google Apps Script and Google Sheets logic used for **monthly ministry scheduling**.
 
@@ -8,7 +8,7 @@ The script is currently configured to:
 
 ## 🏗️ Project Structure
 
-- **`MinistryScheduler.js`**: The core logic controller. Handles form submissions, database updates, and sheet generation.
+- **`Jubal.js`**: The core logic controller. Handles form submissions, database updates, and sheet generation.
 - **`Config.js`**: Centralized configuration file for IDs, role definitions, and email settings.
 - **`Testing.js`**: End-to-end test suite to verify the full lifecycle of the application (excluded from production).
 
@@ -28,7 +28,7 @@ To use this workflow for your own ministry, follow these steps:
 ### 1. Installation
 1. Create a new **Google Sheet**.
 2. Open **Extensions > Apps Script**.
-3. Copy the contents of `MinistryScheduler.js` and `Config.js` into the script editor (ensure you create the separate files).
+3. Copy the contents of `Jubal.js` and `Config.js` into the script editor (ensure you create the separate files).
 
 ### 2. Configuration (`Config.js`)
 Update the `CONFIG` object with your specific details:

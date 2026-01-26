@@ -1,5 +1,5 @@
 /**
- * Configuration for the Ministry Scheduler.
+ * Configuration for Jubal.
  * Update these values to customize for your organization.
  */
 const CONFIG = {
