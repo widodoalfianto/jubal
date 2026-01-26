@@ -251,9 +251,9 @@ function setupAvailability(sheetName, year, month) {
   const roles = CONFIG.roles;
 
   // Add each role with empty cells under each Sunday
-  roles.forEach(function (role) {
+  roles.forEach(role => {
     const roleRow = [role];
-    serviceDates.forEach(function () {
+    serviceDates.forEach(() => {
       roleRow.push(""); // Adding empty cells for each Sunday
     });
     sheet.appendRow(roleRow); // Add the row for the role
@@ -279,7 +279,7 @@ function setupAvailability(sheetName, year, month) {
   const emptyData = roles.map(role => [role, ...Array(5).fill("")]);
 
   // Add empty data under the "Availability" heading for each role
-  emptyData.forEach(function (dataRow) {
+  emptyData.forEach(dataRow => {
     sheet.appendRow(dataRow); // Add the empty data row for the role
   });
 }
@@ -393,7 +393,7 @@ function monthlySetup() {
   }
 
   const sheets = ss.getSheets();
-  sheets.forEach(function(sheet) {
+  sheets.forEach(sheet => {
     if (sheet.getName().startsWith("Form Responses")) {
       const toDelete = sheet.getName();
       ss.deleteSheet(sheet);
