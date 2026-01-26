@@ -21,106 +21,100 @@ function onFormSubmit(e) {
 
 function updateDatabase(e) {
   try {
-    var databaseSS = SpreadsheetApp.openById(databaseFileId);
-    var databaseSheet = databaseSS.getSheetByName(ministrySheetName);
-    var databaseData = databaseSheet.getDataRange().getValues();
+    const databaseSS = SpreadsheetApp.getActiveSpreadsheet();
+    const databaseSheet = databaseSS.getSheetByName(CONFIG.sheetNames.ministryMembers);
+    const databaseData = databaseSheet.getDataRange().getValues();
 
-    Logger.log('--- STARTING UPDATE DATABASE ---');
-    Logger.log('Event Data: ' + JSON.stringify(e));
+    console.log('--- STARTING UPDATE DATABASE ---');
+    console.log(`Event Data: ${JSON.stringify(e)}`);
 
     // Extract form responses using namedValues
-    var responses = e.namedValues;
-    var name = responses[formNameHeader];
-    var timesWilling = responses[formTimesHeader];
+    const responses = e.namedValues;
+    // namedValues returns an array of strings for each key
+    const name = responses[CONFIG.formHeaders.name] ? responses[CONFIG.formHeaders.name][0] : null;
+    const timesWilling = responses[CONFIG.formHeaders.times] ? responses[CONFIG.formHeaders.times][0] : "";
 
-    var unavailableDates = [];
-    var rawDates = responses[formDatesHeader];
+    let unavailableDates = [];
+    const rawDates = responses[CONFIG.formHeaders.dates];
 
     if (rawDates && rawDates.length > 0) {
-      Logger.log('Raw Unavailable Dates from Form: ' + rawDates[0]);
+      console.log(`Raw Unavailable Dates from Form: ${rawDates[0]}`);
 
       // 1. Split the single string response (rawDates[0]) into an array of individual date strings.
-      unavailableDates = rawDates[0].split(',').map(function(dateStr, index) {
-
-        // Logger.log('Processing item ' + index + ': ' + dateStr.trim());
-
+      unavailableDates = rawDates[0].split(',').map((dateStr) => {
         // 2. Use regex to remove ' - ' followed by any string to the end of the date item.
         // Also trim any leading/trailing spaces from the split process.
-        var cleanStr = dateStr.replace(/\s-\s.*$/, '').trim();
-
-        // Logger.log('  -> Cleaned String: ' + cleanStr);
+        const cleanStr = dateStr.replace(/\s-\s.*$/, '').trim();
 
         // 3. Convert to Date object to ensure format is MM/dd (and handle potential variations)
-        var date = new Date(cleanStr);
+        const date = new Date(cleanStr);
         if (!isNaN(date.getTime())) {
-          var mm = ('0' + (date.getMonth() + 1)).slice(-2);
-          var dd = ('0' + date.getDate()).slice(-2);
-          var finalDate = mm + '/' + dd;
-          // Logger.log('  -> Final MM/dd Date: ' + finalDate);
-          return finalDate;
+          const mm = ('0' + (date.getMonth() + 1)).slice(-2);
+          const dd = ('0' + date.getDate()).slice(-2);
+          return `${mm}/${dd}`;
         }
 
         // Fallback for unparseable strings (should be rare)
-        Logger.log('  -> Fallback returned (unparseable): ' + cleanStr);
+        console.log(`  -> Fallback returned (unparseable): ${cleanStr}`);
         return cleanStr;
       });
     }
 
-    var unavailableDatesString = unavailableDates.join(','); // Prepare for storage
-    var comments = responses[formCommentsHeader];
+    const unavailableDatesString = unavailableDates.join(','); // Prepare for storage
+    const comments = responses[CONFIG.formHeaders.comments] ? responses[CONFIG.formHeaders.comments][0] : "";
 
     // Log final extracted values before database write
-    Logger.log('Name: ' + name);
-    Logger.log('Times Willing to Serve: ' + timesWilling);
-    Logger.log('Parsed Unavailable Dates: ' + unavailableDatesString);
-    Logger.log('Comments: ' + comments);
+    console.log(`Name: ${name}`);
+    console.log(`Times Willing to Serve: ${timesWilling}`);
+    console.log(`Parsed Unavailable Dates: ${unavailableDatesString}`);
+    console.log(`Comments: ${comments}`);
     
     // --- Database Update Logic ---
 
-    var found = false;
-    for (var i = 1; i < databaseData.length; i++) {
+    let found = false;
+    for (let i = 1; i < databaseData.length; i++) {
       if (databaseData[i][0] == name) {
         // Update the corresponding row
         databaseSheet.getRange(i + 1, 3).setValue(timesWilling);
         databaseSheet.getRange(i + 1, 4).setValue(unavailableDatesString); // Use the joined string
         databaseSheet.getRange(i + 1, 5).setValue(comments);
         found = true;
-        Logger.log('Updated existing row ' + (i + 1) + ' for ' + name);
+        console.log(`Updated existing row ${i + 1} for ${name}`);
         break;
       }
     }
 
     if (!found) {
       // If no match is found, append a new row
-      var lastRow = databaseSheet.getLastRow() + 1;
+      const lastRow = databaseSheet.getLastRow() + 1;
       databaseSheet.getRange(lastRow, 1).setValue(name);
       databaseSheet.getRange(lastRow, 3).setValue(timesWilling);
       databaseSheet.getRange(lastRow, 4).setValue(unavailableDatesString);
       databaseSheet.getRange(lastRow, 5).setValue(comments);
-      Logger.log('Added new row ' + lastRow + ' for ' + name);
+      console.log(`Added new row ${lastRow} for ${name}`);
     }
   } catch (error) {
-    Logger.log('!!! ERROR in updateDatabase: ' + error.message);
+    console.error(`!!! ERROR in updateDatabase: ${error.message}`);
   }
   updateAvailability();
-  Logger.log('Updated availability and finished execution.');
+  console.log('Updated availability and finished execution.');
 }
 
 function getServiceDates(year, month) {
-  var serviceDates = [];
+  const serviceDates = [];
   
   // Get the first day of the month
-  var firstDay = new Date(year, month, 1);
+  const firstDay = new Date(year, month, 1);
   
   // Find the first Friday of the month
-  var firstFriday = new Date(firstDay);
+  const firstFriday = new Date(firstDay);
   while (firstFriday.getDay() !== 5) { // 5 represents Friday
     firstFriday.setDate(firstFriday.getDate() + 1);
   }
   serviceDates.push(Utilities.formatDate(firstFriday, Session.getScriptTimeZone(), 'MM/dd') + ' - Corporate Prayer');
   
   // Iterate through the days of the month to find all Sundays
-  var currentDate = new Date(firstDay);
+  let currentDate = new Date(firstDay);
   while (currentDate.getMonth() === month) {
     if (currentDate.getDay() === 0) { // 0 represents Sunday
       serviceDates.push(Utilities.formatDate(currentDate, Session.getScriptTimeZone(), 'MM/dd'));
@@ -130,63 +124,26 @@ function getServiceDates(year, month) {
   return serviceDates;
 }
 
-function testForm() {
-  var today = new Date();
-
-  var planDate = new Date(today);
-  planDate.setMonth(today.getMonth() + 1);
-
-  var oldDate = new Date(today);
-  oldDate.setMonth(today.getMonth() - 1);
-
-  var todayMonthName = today.toLocaleString('default', { month: 'long' });
-  var todayMonth = today.getMonth();
-  var todayYear = today.getFullYear();
-
-  var planMonthName = planDate.toLocaleString('default', { month: 'long' });
-  var planMonth = planDate.getMonth();
-  var planYear = planDate.getFullYear();
-
-  var oldMonthName = oldDate.toLocaleString('default', { month: 'long' });
-  var oldMonth = oldDate.getMonth();
-  var oldYear = oldDate.getFullYear();
-
-  createNewFormForMonth(planMonth, planYear, planMonthName);
-}
-
 //TODO: Include metadata processing in this function for modularity
 function createNewFormForMonth(month, year, monthName) {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var metadataSheet = ss.getSheetByName("Form Metadata") || ss.insertSheet("Form Metadata");
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const metadataSheet = ss.getSheetByName(CONFIG.sheetNames.formMetadata) || ss.insertSheet(CONFIG.sheetNames.formMetadata);
 
   // Create a new form for the upcoming month
-  var formTitle = "Music Ministry Availability - " + monthName;
-  var form = FormApp.create(formTitle);
+  const formTitle = `Music Ministry Availability - ${monthName}`;
+  const form = FormApp.create(formTitle);
 
   // Name Dropdown (ListItem)
-  var nameDropdown = form.addListItem().setTitle(formNameHeader).setRequired(true);
+  const nameDropdown = form.addListItem().setTitle(CONFIG.formHeaders.name).setRequired(true);
   nameDropdown.setChoiceValues(["Loading..."]);
 
-  // const rolesMC = form.addCheckboxItem();
-  // rolesMC.setTitle("Select Your Roles").setChoices([
-  //   rolesMC.createChoice('WL'),
-  //   rolesMC.createChoice('Singer'),
-  //   rolesMC.createChoice('Acoustic'),
-  //   rolesMC.createChoice('Keyboard'),
-  //   rolesMC.createChoice('EG'),
-  //   rolesMC.createChoice('Bass'),
-  //   rolesMC.createChoice('Drums')
-  // ]);
-
-  // Number of Times Willing to Serve
-  // form.addTextItem().setTitle("Number of Times Willing to Serve").setRequired(true);
-  var numDropdown = form.addListItem()
-  .setTitle(formTimesHeader)
+  const numDropdown = form.addListItem()
+  .setTitle(CONFIG.formHeaders.times)
   .setChoiceValues(['1', '2', '3', '4', '5']) // Set the dropdown options
   .setRequired(true); // Make the question required
   
   // Add next month's form metadata
-  var lastRow = metadataSheet.getLastRow();
+  const lastRow = metadataSheet.getLastRow();
   metadataSheet.getRange(lastRow + 1, 1).setValue(monthName + " Form");
   metadataSheet.getRange(lastRow + 1, 2).setValue(form.getId());
 
@@ -194,69 +151,69 @@ function createNewFormForMonth(month, year, monthName) {
   updateFormDropdown();
 
   // Add the service dates to the form for unavailable dates selection
-  var serviceDates = getServiceDates(year, month);
-  var dateChoices = serviceDates;
+  const serviceDates = getServiceDates(year, month);
+  const dateChoices = serviceDates;
 
   const availMC = form.addCheckboxItem();
-  availMC.setTitle(formDatesHeader)
+  availMC.setTitle(CONFIG.formHeaders.dates)
     .setChoices(dateChoices.map(date => availMC.createChoice(date)));
 
   // Optional comments section
-  form.addTextItem().setTitle(formCommentsHeader).setRequired(false);
+  form.addTextItem().setTitle(CONFIG.formHeaders.comments).setRequired(false);
 
   // Link the form responses to a new sheet in the current spreadsheet
   form.setDestination(FormApp.DestinationType.SPREADSHEET, ss.getId());  // Link the form to the new response sheet
-  Logger.log("Linked form responses to new sheet");
+  console.log("Linked form responses to new sheet");
 
   // Get the links for the edit and responder URLs
-  var editUrl = form.getEditUrl(); // Edit link for the form owner
-  var responderUrl = form.getPublishedUrl(); // Responder link for the participants
+  const editUrl = form.getEditUrl(); // Edit link for the form owner
+  const responderUrl = form.getPublishedUrl(); // Responder link for the participants
 
   // Send email notification about the new form
-  var emailSubject = "New Music Ministry Availability Form Created";
-  var emailBody = "A new Music Ministry Availability Form has been created for the month of " + monthName + ".\n\n" +
+  const emailSubject = "New Music Ministry Availability Form Created";
+  const emailBody = "A new Music Ministry Availability Form has been created for the month of " + monthName + ".\n\n" +
                   "You can access and fill out the form using the following link:\n" + responderUrl + "\n\n" +
                   "If you need to edit the form, use the following link:\n" + editUrl + "\n\n" +
                   "Please submit your availability as soon as possible.";
-  var recipientEmail = "widodoalfianto94@gmail.com"; // Replace with your email address
+  const recipientEmail = CONFIG.ids.adminEmails.join(",");
 
   // Send email
   MailApp.sendEmail(recipientEmail, emailSubject, emailBody);
 
-  var file = DriveApp.getFileById(form.getId());
-  var targetFolder = DriveApp.getFolderById(formsFolderId);
+  const file = DriveApp.getFileById(form.getId());
+  const targetFolder = DriveApp.getFolderById(CONFIG.ids.formsFolder);
   file.moveTo(targetFolder);
 }
 
 function updateFormDropdown() {
-  var ss = SpreadsheetApp.openById(databaseFileId);
-  var databaseSheet = ss.getSheetByName(ministrySheetName);
-  var metadataSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Form Metadata");
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const databaseSheet = ss.getSheetByName(CONFIG.sheetNames.ministryMembers);
+  const metadataSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG.sheetNames.formMetadata);
 
   if (!metadataSheet) {
-    Logger.log("Form Metadata sheet missing.");
+    console.log("Form Metadata sheet missing.");
     return;
   }
 
-  var formId = metadataSheet.getRange("B2").getValue();
+  const formId = metadataSheet.getRange("B2").getValue();
   if (!formId) {
-    Logger.log("No Form ID found.");
+    console.log("No Form ID found.");
     return;
   }
 
   // Retrieve the list of names from the "Ministry Members" sheet
-  var names = databaseSheet.getRange("A2:A" + databaseSheet.getLastRow()).getValues();
+  let names = databaseSheet.getRange("A2:A" + databaseSheet.getLastRow()).getValues();
   names = names.flat().filter(String); // Flatten the array and remove any empty strings
 
   // Open the form using the Form ID
-  var form = FormApp.openById(formId);
+  const form = FormApp.openById(formId);
 
   // Locate the dropdown question by its title
-  var items = form.getItems(FormApp.ItemType.LIST);
-  var dropdownTitle = formNameHeader; // Adjust this to match your question title
-  var dropdownItem = null;
+  const items = form.getItems(FormApp.ItemType.LIST);
+  const dropdownTitle = CONFIG.formHeaders.name; // Adjust this to match your question title
+  let dropdownItem = null;
 
-  for (var i = 0; i < items.length; i++) {
+  for (let i = 0; i < items.length; i++) {
     if (items[i].getTitle() === dropdownTitle) {
       dropdownItem = items[i].asListItem();
       break;
@@ -266,15 +223,15 @@ function updateFormDropdown() {
   if (dropdownItem) {
     // Update the dropdown choices
     dropdownItem.setChoiceValues(names);
-    Logger.log("Dropdown updated with names from the sheet.");
+    console.log("Dropdown updated with names from the sheet.");
   } else {
-    Logger.log("Dropdown question not found.");
+    console.log("Dropdown question not found.");
   }
 }
 
 function setupAvailability(sheetName, year, month) {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName(sheetName);
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(sheetName);
   if (!sheet) {
     sheet = ss.insertSheet(sheetName); // If the sheet doesn't exist, create it
   } else {
@@ -282,21 +239,21 @@ function setupAvailability(sheetName, year, month) {
   }
 
   // Get next month's Sundays dynamically
-  var serviceDates = getServiceDates(year, month);
+  const serviceDates = getServiceDates(year, month);
 
-  var headerRow = ["Schedule"].concat(serviceDates);
+  const headerRow = ["Schedule"].concat(serviceDates);
   sheet.appendRow(headerRow); // Adding the header row to the sheet
 
   // Select the header row range and make it bold
-  var headerRange = sheet.getRange(1, 1, 1, headerRow.length);
+  const headerRange = sheet.getRange(1, 1, 1, headerRow.length);
   headerRange.setFontWeight("bold"); // Make the header text bold
 
   // Define the roles (without any members for now)
-  var roles = ["WL", "SINGER", "ACOUSTIC", "KEYBOARD", "EG", "BASS", "DRUMS"];
+  const roles = CONFIG.roles;
 
   // Add each role with empty cells under each Sunday
   roles.forEach(function (role) {
-    var roleRow = [role];
+    const roleRow = [role];
     serviceDates.forEach(function () {
       roleRow.push(""); // Adding empty cells for each Sunday
     });
@@ -304,31 +261,23 @@ function setupAvailability(sheetName, year, month) {
   });
 
   // Apply bold formatting to all the rows with roles
-  var lastRow = sheet.getLastRow();
+  const lastRow = sheet.getLastRow();
   sheet.getRange(2, 1, lastRow - 1, sheet.getLastColumn()).setFontWeight("bold"); // Make role rows bold
 
   // Add 3 empty rows of space before the availability section
-  var insertionRow = lastRow + 1;
+  const insertionRow = lastRow + 1;
   sheet.insertRowsAfter(insertionRow, 3);
 
   // Add "Availability" above the role section
   sheet.getRange(insertionRow + 3, 1).setValue("Availability").setFontWeight("bold");
-  var availabilityRange = sheet.getRange(sheet.getLastRow(), 1, 1, sheet.getLastColumn());
+  const availabilityRange = sheet.getRange(sheet.getLastRow(), 1, 1, sheet.getLastColumn());
   availabilityRange.setFontWeight("bold"); // Make the "Availability" text bold
 
   // Auto-resize the columns to fit the content
   sheet.autoResizeColumns(1, sheet.getLastColumn());
 
   // Set up empty data below the "Availability" section for each role
-  var emptyData = [
-    ["WL", "", "", "", ""],  // Example for WL role
-    ["SINGER", "", "", "", ""],  // Example for SINGER role
-    ["ACOUSTIC", "", "", "", ""],  // Example for ACOUSTIC role
-    ["KEYBOARD", "", "", "", ""],  // Example for KEYBOARD role
-    ["EG", "", "", "", ""],  // Example for ELECTRIC/SYNTH role
-    ["BASS", "", "", "", ""],  // Example for BASS role
-    ["DRUMS", "", "", "", ""],  // Example for DRUMS/CAJON role
-  ];
+  const emptyData = roles.map(role => [role, ...Array(5).fill("")]);
 
   // Add empty data under the "Availability" heading for each role
   emptyData.forEach(function (dataRow) {
@@ -338,92 +287,92 @@ function setupAvailability(sheetName, year, month) {
 
 function clearByHeader(header) {
     // Open the spreadsheet by its ID
-  var ss = SpreadsheetApp.openById(databaseFileId);
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
   
   // Access the "Ministry Members" sheet
-  var sheet = ss.getSheetByName(ministrySheetName);
+  const sheet = ss.getSheetByName(CONFIG.sheetNames.ministryMembers);
   
   if (!sheet) {
-    Logger.log("Sheet not found: " + ministrySheetName);
+    console.log("Sheet not found: " + CONFIG.sheetNames.ministryMembers);
     return;
   }
   
   // Get the data range of the sheet
-  var dataRange = sheet.getDataRange();
+  const dataRange = sheet.getDataRange();
   
   // Get the values in the first row to find the "Not Available Dates" column
-  var headers = dataRange.getValues()[0];
+  const headers = dataRange.getValues()[0];
   
   // Find the index of the provided header column
-  var colIndex = headers.indexOf(header) + 1; // +1 to convert to 1-based index
+  const colIndex = headers.indexOf(header) + 1; // +1 to convert to 1-based index
   
   if (colIndex === 0) {
-    Logger.log(header + ' column not found.');
+    console.log(header + ' column not found.');
     return;
   }
   
   // Determine the range to clear: from row 2 to the last row in the identified column
-  var lastRow = sheet.getLastRow();
+  const lastRow = sheet.getLastRow();
   if (lastRow < 2) {
-    Logger.log("No data to clear.");
+    console.log("No data to clear.");
     return;
   }
   
   // Clear the contents of the column, starting from row 2
   sheet.getRange(2, colIndex, lastRow - 1).clearContent();
   
-  Logger.log(header + ' column cleared.');
+  console.log(header + ' column cleared.');
 }
 
 function monthlySetup() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var metadataSheet = ss.getSheetByName("Form Metadata") || ss.insertSheet("Form Metadata");
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const metadataSheet = ss.getSheetByName("Form Metadata") || ss.insertSheet("Form Metadata");
 
-  var today = new Date();
+  const today = new Date();
 
-  var planDate = new Date(today);
+  const planDate = new Date(today);
   planDate.setMonth(today.getMonth() + 1);
 
-  var oldDate = new Date(today);
+  const oldDate = new Date(today);
   oldDate.setMonth(today.getMonth() - 1);
 
-  var todayMonthName = today.toLocaleString('default', { month: 'long' });
-  var todayMonth = today.getMonth();
-  var todayYear = today.getFullYear();
+  const todayMonthName = today.toLocaleString('default', { month: 'long' });
+  const todayMonth = today.getMonth();
+  const todayYear = today.getFullYear();
 
-  var planMonthName = planDate.toLocaleString('default', { month: 'long' });
-  var planMonth = planDate.getMonth();
-  var planYear = planDate.getFullYear();
+  const planMonthName = planDate.toLocaleString('default', { month: 'long' });
+  const planMonth = planDate.getMonth();
+  const planYear = planDate.getFullYear();
 
-  var oldMonthName = oldDate.toLocaleString('default', { month: 'long' });
-  var oldMonth = oldDate.getMonth();
-  var oldYear = oldDate.getFullYear();
+  const oldMonthName = oldDate.toLocaleString('default', { month: 'long' });
+  const oldMonth = oldDate.getMonth();
+  const oldYear = oldDate.getFullYear();
 
-  var newTabName = `${planMonthName} Availability`;
-  var deleteTabName = `${oldMonthName} Availability`;
+  const newTabName = `${planMonthName} Availability`;
+  const deleteTabName = `${oldMonthName} Availability`;
   setupAvailability(newTabName, planYear, planMonth);
 
-  clearByHeader(sheetsTimesHeader);
-  clearByHeader(sheetsDatesHeader);
-  clearByHeader(sheetsCommentsHeader);
+  clearByHeader(CONFIG.sheetHeaders.times);
+  clearByHeader(CONFIG.sheetHeaders.dates);
+  clearByHeader(CONFIG.sheetHeaders.comments);
 
   if (!ss.getSheetByName(newTabName)) {
     ss.insertSheet(newTabName);
-    Logger.log("Created new tab: " + newTabName);
+    console.log("Created new tab: " + newTabName);
   }
 
-  var oldSheet = ss.getSheetByName(deleteTabName);
+  const oldSheet = ss.getSheetByName(deleteTabName);
   if (oldSheet) {
     ss.deleteSheet(oldSheet);
-    Logger.log("Deleted old tab: " + deleteTabName);
+    console.log("Deleted old tab: " + deleteTabName);
   }
 
   // Store the form ID in the "Form Metadata" sheet in the specified structure
   // Clear any old form metadata if we have more than 2 entries
-  var lastRow = metadataSheet.getLastRow();
+  const lastRow = metadataSheet.getLastRow();
   if (lastRow > 1) {
-    var currentMonthFormLabel = metadataSheet.getRange(2, 1).getValue();  // Get the current month's form label
-    var currentMonthFormId = metadataSheet.getRange(2, 2).getValue();  // Get the current month's form ID
+    const currentMonthFormLabel = metadataSheet.getRange(2, 1).getValue();  // Get the current month's form label
+    const currentMonthFormId = metadataSheet.getRange(2, 2).getValue();  // Get the current month's form ID
 
     // Move the current month's form metadata to row 1
     metadataSheet.getRange(1, 1).setValue(currentMonthFormLabel);  // Move label to row 1
@@ -432,41 +381,41 @@ function monthlySetup() {
   }
 
   if (metadataSheet) {
-    var oldFormId = metadataSheet.getRange("B1").getValue(); // Get the old form ID from metadata
+    const oldFormId = metadataSheet.getRange("B1").getValue(); // Get the old form ID from metadata
     if (oldFormId) {
       try {
-        var oldForm = FormApp.openById(oldFormId); // Open the form using the ID
+        const oldForm = FormApp.openById(oldFormId); // Open the form using the ID
         oldForm.removeDestination(); // Remove the link to the spreadsheet
-        Logger.log("De-linked form with ID: " + oldFormId);
+        console.log("De-linked form with ID: " + oldFormId);
       } catch (e) {
-        Logger.log("Could not de-link or find the old form: " + e.message);
+        console.log("Could not de-link or find the old form: " + e.message);
       }
     }
   }
 
-  var sheets = ss.getSheets();
+  const sheets = ss.getSheets();
   sheets.forEach(function(sheet) {
     if (sheet.getName().startsWith("Form Responses")) {
-      toDelete = sheet.getName();
+      const toDelete = sheet.getName();
       ss.deleteSheet(sheet);
-      Logger.log("Deleted old Form Responses tab: " + toDelete);
+      console.log("Deleted old Form Responses tab: " + toDelete);
     }
   })
   createNewFormForMonth(planMonth, planYear, planMonthName);
-  Logger.log(`Created new form for ${planMonthName}`);
+  console.log(`Created new form for ${planMonthName}`);
 }
 
 function findFormResponseSheet() {
   // Open the active spreadsheet
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
   
   // Get all sheets in the spreadsheet
-  var sheets = ss.getSheets();
+  const sheets = ss.getSheets();
   
   // Iterate through each sheet to find the form response sheet
-  for (var i = 0; i < sheets.length; i++) {
-    var sheet = sheets[i];
-    var sheetName = sheet.getName();
+  for (let i = 0; i < sheets.length; i++) {
+    const sheet = sheets[i];
+    const sheetName = sheet.getName();
     
     // Check if the sheet name starts with "Form Responses"
     if (sheetName.startsWith("Form Responses")) {
@@ -480,56 +429,56 @@ function findFormResponseSheet() {
 }
 
 function updateAvailability() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
 
-  Logger.log('--- STARTING updateAvailability ---');
+  console.log('--- STARTING updateAvailability ---');
 
-  var today = new Date();
-  var planDate = new Date(today);
+  const today = new Date();
+  const planDate = new Date(today);
   planDate.setMonth(today.getMonth() + 1);
-  var planMonthName = planDate.toLocaleString('default', { month: 'long' });
-  var sheetName = planMonthName + " Availability";
+  const planMonthName = planDate.toLocaleString('default', { month: 'long' });
+  const sheetName = planMonthName + " Availability";
 
-  var matrixSheet = ss.getSheetByName(sheetName);
-  var databaseSheet = ss.getSheetByName(ministrySheetName);
+  const matrixSheet = ss.getSheetByName(sheetName);
+  const databaseSheet = ss.getSheetByName(CONFIG.sheetNames.ministryMembers);
 
   if (!matrixSheet || !databaseSheet) {
-    Logger.log("Error: One or more required sheets are missing.");
+    console.log("Error: One or more required sheets are missing.");
     return;
   }
 
-  var databaseData = databaseSheet.getDataRange().getValues();
+  const databaseData = databaseSheet.getDataRange().getValues();
 
   if (!databaseData.length) {
-    Logger.log("No data found in the Ministry Members sheet.");
+    console.log("No data found in the Ministry Members sheet.");
     return;
   }
 
   // Get Date Headers from the sheet (Row 1, starting from column 2)
   var lastCol = matrixSheet.getLastColumn();
   if (lastCol <= 1) {
-    Logger.log("Error: Availability matrix has no date columns.");
+    console.log("Error: Availability matrix has no date columns.");
     return;
   }
   var headerRowValues = matrixSheet.getRange(1, 2, 1, lastCol - 1).getValues();
   var dateHeaders = headerRowValues[0];
-  Logger.log('Matrix Date Headers (Raw): ' + dateHeaders.join(', '));
+  console.log('Matrix Date Headers (Raw): ' + dateHeaders.join(', '));
 
   var lastCol = matrixSheet.getLastColumn();
 
   var dateHeaders = matrixSheet
-    .getRange(dateRowIndex, 2, 1, lastCol - 1)
+    .getRange(CONFIG.layout.dateRowIndex, 2, 1, lastCol - 1)
     .getDisplayValues()[0];
 
   var serviceDateKeys = dateHeaders.map(function(h) {
     return String(h).trim().substring(0, 5);
   });
 
-  Logger.log('Standardized Date Keys: ' + serviceDateKeys.join(', '));
+  console.log('Standardized Date Keys: ' + serviceDateKeys.join(', '));
 
   // Initialize the availability object
   var availability = {};
-  var roleOrder = ["WL", "SINGER", "ACOUSTIC", "KEYBOARD", "EG", "BASS", "DRUMS"];
+  var roleOrder = CONFIG.roles;
 
   // Standardize roleOrder to uppercase for case-insensitive matching
   roleOrder = roleOrder.map(function(role) { return role.toUpperCase(); });
@@ -568,13 +517,13 @@ function updateAvailability() {
     if (!name || !roles.length) continue;
 
     // Format the name as "Firstname L."
-    var nameParts = name.split(" ");
+    const nameParts = name.split(" ");
     if (nameParts.length > 1) {
       name = nameParts[0] + " " + nameParts[1].charAt(0).toUpperCase() + ".";
     }
 
     // If "Times Willing to Serve" is blank, mark unavailable for all dates
-    var isUnavailableAllMonth = timesWilling === "";
+    const isUnavailableAllMonth = timesWilling === "";
 
     roles.forEach(function(role) {
       if (!availability[role]) availability[role] = {};
@@ -583,7 +532,7 @@ function updateAvailability() {
       serviceDateKeys.forEach(function(dateKey) {
         
         // dateKey is the clean "MM/dd" string (e.g., "12/14")
-        var date = dateKey; 
+        const date = dateKey; 
         
         if (!availability[role][date]) availability[role][date] = [];
         
@@ -597,23 +546,23 @@ function updateAvailability() {
   } // End of main database iteration loop
 
   // Clear the old values from the matrix (excluding headers) - Run once
-  var numRoles = roleOrder.length;
+  const numRoles = roleOrder.length;
   // Use serviceDateKeys.length to define the range width
-  var clearRange = matrixSheet.getRange(headerRowIndex, 2, numRoles, serviceDateKeys.length); 
+  const clearRange = matrixSheet.getRange(CONFIG.layout.headerRowIndex, 2, numRoles, serviceDateKeys.length); 
   clearRange.clearContent();
 
   // Update the availability matrix in the sheet
-  var roleRowIndex = headerRowIndex;
+  let roleRowIndex = CONFIG.layout.headerRowIndex;
   roleOrder.forEach(function(role) {
-    var roleData = availability[role];
+    const roleData = availability[role];
     if (roleData) {
-      var namesRow = serviceDateKeys.map(function(dateKey) {
+      const namesRow = serviceDateKeys.map(function(dateKey) {
         // dateKey is the clean "MM/dd" string, used as the lookup key
         return roleData[dateKey] ? roleData[dateKey].join("\n") : "";
       });
       
       // Set values in the sheet
-      var range = matrixSheet.getRange(roleRowIndex, 2, 1, namesRow.length);
+      const range = matrixSheet.getRange(roleRowIndex, 2, 1, namesRow.length);
       range.setValues([namesRow]);
       range.setWrap(false); // Disable text wrapping for the range
       roleRowIndex++;
@@ -621,7 +570,46 @@ function updateAvailability() {
   });
 
   matrixSheet.autoResizeColumns(1, matrixSheet.getLastColumn() - 1);
-  matrixSheet.autoResizeRows(headerRowIndex, roleRowIndex - headerRowIndex + 1);
-  Logger.log("Availability matrix updated in sheet: " + sheetName);
-  Logger.log('--- FINISHED updateAvailability ---');
+  matrixSheet.autoResizeRows(CONFIG.layout.headerRowIndex, roleRowIndex - CONFIG.layout.headerRowIndex + 1);
+  console.log("Availability matrix updated in sheet: " + sheetName);
+  console.log('--- FINISHED updateAvailability ---');
+}
+
+/**
+ * Run this function once to set up the spreadsheet for a new user.
+ * It creates the database sheet and metadata sheet with dummy data.
+ */
+function initializeProject() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  
+  // 1. Create Ministry Members Database if it doesn't exist
+  let dbSheet = ss.getSheetByName(CONFIG.sheetNames.ministryMembers);
+  if (!dbSheet) {
+    dbSheet = ss.insertSheet(CONFIG.sheetNames.ministryMembers);
+    // Add Headers
+    const headers = [
+      CONFIG.sheetHeaders.name, 
+      CONFIG.sheetHeaders.roles, 
+      CONFIG.sheetHeaders.times, 
+      CONFIG.sheetHeaders.dates, 
+      CONFIG.sheetHeaders.comments
+    ];
+    dbSheet.appendRow(headers);
+    dbSheet.getRange(1, 1, 1, headers.length).setFontWeight("bold");
+    
+    // Add Dummy Data
+    const dummyRow = ["John Doe", "WL, ACOUSTIC", "4", "", "Excited to serve!"];
+    dbSheet.appendRow(dummyRow);
+    console.log("Created Ministry Members sheet with dummy data.");
+  }
+
+  // 2. Create Form Metadata sheet if it doesn't exist
+  let metaSheet = ss.getSheetByName(CONFIG.sheetNames.formMetadata);
+  if (!metaSheet) {
+    metaSheet = ss.insertSheet(CONFIG.sheetNames.formMetadata);
+    metaSheet.appendRow(["Form Name", "Form ID"]);
+    console.log("Created Form Metadata sheet.");
+  }
+  
+  console.log("Initialization complete. You can now run monthlySetup().");
 }
