@@ -13,6 +13,7 @@ const CONFIG = {
     settings: "Settings",
     recurring: "Recurring",
     events: "Events",
+    eventsArchive: "Events Archive",
     recurringEvents: "Recurring Events",
     monthlyEvents: "Monthly Events"
   },
@@ -36,7 +37,9 @@ const CONFIG = {
     timeZone: "America/Los_Angeles",
     formCreationDay: 8,
     timesChoices: ["1", "2", "3", "4", "5"],
-    availabilitySheetSuffix: "Availability"
+    availabilitySheetSuffix: "Availability",
+    eventsArchiveFrequency: "Yearly",
+    eventsArchiveMonth: "January"
   },
   layout: {
     headerRowIndex: 13,

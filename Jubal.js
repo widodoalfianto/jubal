@@ -345,7 +345,9 @@ function getDefaultRuntimeSettings() {
     roles: CONFIG.roles.slice(),
     formCreationDay: CONFIG.defaults.formCreationDay,
     timesChoices: CONFIG.defaults.timesChoices.slice(),
-    availabilitySheetSuffix: CONFIG.defaults.availabilitySheetSuffix
+    availabilitySheetSuffix: CONFIG.defaults.availabilitySheetSuffix,
+    eventsArchiveFrequency: CONFIG.defaults.eventsArchiveFrequency,
+    eventsArchiveMonth: CONFIG.defaults.eventsArchiveMonth
   };
 }
 
@@ -362,12 +364,16 @@ function loadRuntimeSettings() {
     roles: parseCsv(raw.roles),
     formCreationDay: toIntegerOrDefault(raw.form_creation_day, defaults.formCreationDay),
     timesChoices: parseCsv(raw.times_choices),
-    availabilitySheetSuffix: String(raw.availability_sheet_suffix || defaults.availabilitySheetSuffix).trim() || defaults.availabilitySheetSuffix
+    availabilitySheetSuffix: String(raw.availability_sheet_suffix || defaults.availabilitySheetSuffix).trim() || defaults.availabilitySheetSuffix,
+    eventsArchiveFrequency: String(raw.events_archive_frequency || defaults.eventsArchiveFrequency).trim() || defaults.eventsArchiveFrequency,
+    eventsArchiveMonth: String(raw.events_archive_month || defaults.eventsArchiveMonth).trim() || defaults.eventsArchiveMonth
   };
 
   if (!settings.adminEmails.length) settings.adminEmails = defaults.adminEmails.slice();
   if (!settings.roles.length) settings.roles = defaults.roles.slice();
   if (!settings.timesChoices.length) settings.timesChoices = defaults.timesChoices.slice();
+  if (!settings.eventsArchiveFrequency) settings.eventsArchiveFrequency = defaults.eventsArchiveFrequency;
+  if (!settings.eventsArchiveMonth) settings.eventsArchiveMonth = defaults.eventsArchiveMonth;
 
   return settings;
 }
@@ -466,6 +472,30 @@ function normalizeFrequency(value) {
   const normalized = String(value).trim().toLowerCase();
   if (['weekly', 'monthly', 'yearly', 'easter'].includes(normalized)) return normalized;
   return '';
+}
+
+function normalizeArchiveFrequency(value) {
+  if (value === null || value === undefined || value === '') return 'yearly';
+  const normalized = String(value).trim().toLowerCase();
+  if (['off', 'monthly', 'quarterly', 'yearly'].includes(normalized)) return normalized;
+  return 'yearly';
+}
+
+function getArchiveTriggerMonths(frequency, archiveMonth) {
+  const normalizedFrequency = normalizeArchiveFrequency(frequency);
+  const monthNumber = parseMonthNumber(archiveMonth);
+
+  if (normalizedFrequency === 'off') return [];
+  if (normalizedFrequency === 'monthly') return [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+  if (normalizedFrequency === 'quarterly') return [1, 4, 7, 10];
+  return [monthNumber || 1];
+}
+
+function shouldArchiveEventsNow(referenceDate, settings) {
+  const runtimeSettings = settings || loadRuntimeSettings();
+  const triggerMonths = getArchiveTriggerMonths(runtimeSettings.eventsArchiveFrequency, runtimeSettings.eventsArchiveMonth);
+  const currentMonth = (referenceDate || new Date()).getMonth() + 1;
+  return triggerMonths.indexOf(currentMonth) !== -1;
 }
 
 function slugifyRuleId(value, fallback) {
@@ -1651,6 +1681,225 @@ function configureEventsSheetUi(sheet) {
   sheet.autoResizeColumns(1, Math.min(8, sheet.getLastColumn()));
 }
 
+function getRecurringSeedRows() {
+  return [
+    ['Enabled', 'Event', 'Frequency', 'Weekday', 'Week Of Month', 'Month', 'Day', 'Include In Form', 'Include In Schedule', 'Notes'],
+    [true, '', 'Weekly', 'Sunday', 'every', 'all', '', true, true, 'Default weekly Sunday schedule. Leave Event blank to show plain dates.'],
+    [false, 'Corporate Prayer', 'Monthly', 'Friday', 1, 'all', '', true, true, 'Enable if your church has a monthly prayer gathering'],
+    [false, 'Easter', 'Easter', '', '', 'all', '', true, true, 'Enable to include Easter automatically each year'],
+    [false, 'Christmas', 'Yearly', '', '', '12', 25, true, true, 'Enable to include Christmas automatically each year']
+  ];
+}
+
+function getEventsSeedRows() {
+  return [
+    ['Enabled', 'Date', 'Event', 'Action', 'Recurring Event', 'Include In Form', 'Include In Schedule', 'Notes'],
+    [false, new Date(2026, 3, 3), 'Good Friday', 'ADD', '', true, true, 'Example one-time event. Change the date, then check Enabled to use it.'],
+    [false, new Date(2026, 3, 3), 'Corporate Prayer', 'REMOVE', 'Corporate Prayer', true, true, 'Example: remove one recurring event date for a specific month.']
+  ];
+}
+
+function seedSheetRowsIfEmpty(sheet, rows) {
+  if (!sheet || !rows || rows.length < 2) return false;
+
+  if (sheet.getLastRow() > 1) {
+    const existingRows = sheet.getRange(2, 1, sheet.getLastRow() - 1, Math.min(sheet.getLastColumn(), rows[0].length)).getDisplayValues();
+    const hasNonBlankData = existingRows.some(row => !isBlankRow(row));
+    if (hasNonBlankData) return false;
+  }
+
+  const bodyRows = rows.slice(1);
+  const requiredRows = bodyRows.length;
+  if (sheet.getMaxRows() < requiredRows + 1) {
+    sheet.insertRowsAfter(sheet.getMaxRows(), requiredRows + 1 - sheet.getMaxRows());
+  }
+
+  sheet.getRange(2, 1, requiredRows, rows[0].length).setValues(bodyRows);
+  return true;
+}
+
+function getSettingsSeedRows() {
+  return [
+    ['Key', 'Value', 'Notes'],
+    ['church_name', CONFIG.defaults.churchName, 'Used in form titles and notifications'],
+    ['time_zone', safeGetScriptTimeZone(), 'IANA timezone for event generation'],
+    ['forms_folder_id', CONFIG.ids.formsFolder, 'Drive folder where forms are moved after creation'],
+    ['admin_emails', CONFIG.ids.adminEmails.join(','), 'Comma-separated admin recipients'],
+    ['roles', CONFIG.roles.join(','), 'Comma-separated ministry roles'],
+    ['form_creation_day', CONFIG.defaults.formCreationDay, 'Reserved for future time-driven setup'],
+    ['times_choices', CONFIG.defaults.timesChoices.join(','), 'Comma-separated willingness choices'],
+    ['availability_sheet_suffix', CONFIG.defaults.availabilitySheetSuffix, 'Suffix used for monthly availability tabs'],
+    ['events_archive_frequency', CONFIG.defaults.eventsArchiveFrequency, 'Off, Monthly, Quarterly, or Yearly'],
+    ['events_archive_month', CONFIG.defaults.eventsArchiveMonth, 'Month that yearly archiving should run, such as January']
+  ];
+}
+
+function ensureSettingsSheetRows(sheet, rows) {
+  if (!sheet || !rows || rows.length < 2) return;
+
+  const existing = {};
+  if (sheet.getLastRow() >= 2) {
+    const currentRows = sheet.getRange(2, 1, sheet.getLastRow() - 1, Math.min(3, sheet.getLastColumn())).getValues();
+    currentRows.forEach((row, index) => {
+      const key = String(row[0] || '').trim().toLowerCase();
+      if (key) existing[key] = index + 2;
+    });
+  }
+
+  for (let i = 1; i < rows.length; i++) {
+    const row = rows[i];
+    const key = String(row[0] || '').trim().toLowerCase();
+    if (!key) continue;
+
+    if (existing[key]) {
+      if (!sheet.getRange(existing[key], 3).getValue()) {
+        sheet.getRange(existing[key], 3).setValue(row[2]);
+      }
+      continue;
+    }
+
+    sheet.appendRow(row);
+  }
+}
+
+function configureSettingsSheetUi(sheet) {
+  if (!sheet || sheet.getLastRow() < 2) return;
+
+  sheet.setFrozenRows(1);
+  const rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, Math.min(2, sheet.getLastColumn())).getValues();
+  rows.forEach((row, index) => {
+    const key = String(row[0] || '').trim().toLowerCase();
+    const valueRange = sheet.getRange(index + 2, 2);
+    valueRange.clearDataValidations();
+
+    if (key === 'events_archive_frequency') {
+      valueRange.setDataValidation(
+        SpreadsheetApp.newDataValidation()
+          .requireValueInList(['Off', 'Monthly', 'Quarterly', 'Yearly'], true)
+          .setAllowInvalid(false)
+          .build()
+      );
+    } else if (key === 'events_archive_month') {
+      valueRange.setDataValidation(
+        SpreadsheetApp.newDataValidation()
+          .requireValueInList(['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'], true)
+          .setAllowInvalid(false)
+          .build()
+      );
+    }
+  });
+}
+
+function ensureEventsArchiveSheet() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(CONFIG.sheetNames.eventsArchive);
+  const headers = ['Enabled', 'Date', 'Event', 'Action', 'Recurring Event', 'Include In Form', 'Include In Schedule', 'Notes', 'Archived At'];
+
+  if (!sheet) {
+    sheet = ss.insertSheet(CONFIG.sheetNames.eventsArchive);
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold');
+    sheet.setFrozenRows(1);
+  } else if (sheet.getLastRow() < 1) {
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold');
+    sheet.setFrozenRows(1);
+  }
+
+  return sheet;
+}
+
+function isExampleEventsRow(row, headerMap) {
+  const note = String(getValueByHeader(row, headerMap, ['Notes'], '') || '').trim().toLowerCase();
+  const enabled = parseBooleanLike(getValueByHeader(row, headerMap, ['Enabled'], false), false);
+  return !enabled && note.indexOf('example') === 0;
+}
+
+function archivePastEvents(referenceDate) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const eventsSheet = ss.getSheetByName(CONFIG.sheetNames.events);
+  if (!eventsSheet || !sheetUsesFriendlyEventsLayout(eventsSheet) || eventsSheet.getLastRow() < 2) {
+    return { archivedRows: 0, keptRows: 0, examplesPreserved: 0 };
+  }
+
+  const rows = eventsSheet.getDataRange().getValues();
+  const header = rows[0];
+  const headerMap = buildHeaderMap(header);
+  const now = referenceDate ? new Date(referenceDate) : new Date();
+  const cutoff = new Date(now.getFullYear(), now.getMonth(), 1);
+  const archivedAt = new Date();
+
+  const keepRows = [];
+  const archiveRows = [];
+  let examplesPreserved = 0;
+
+  for (let i = 1; i < rows.length; i++) {
+    const row = rows[i];
+    if (isBlankRow(row)) continue;
+
+    if (isExampleEventsRow(row, headerMap)) {
+      keepRows.push(row);
+      examplesPreserved++;
+      continue;
+    }
+
+    const parsedDate = parseSingleDate(getValueByHeader(row, headerMap, ['Date'], ''));
+    if (parsedDate && parsedDate < cutoff) {
+      archiveRows.push(row.concat([archivedAt]));
+    } else {
+      keepRows.push(row);
+    }
+  }
+
+  if (!archiveRows.length) {
+    seedSheetRowsIfEmpty(eventsSheet, getEventsSeedRows());
+    configureEventsSheetUi(eventsSheet);
+    return { archivedRows: 0, keptRows: keepRows.length, examplesPreserved: examplesPreserved };
+  }
+
+  const archiveSheet = ensureEventsArchiveSheet();
+  archiveSheet.getRange(archiveSheet.getLastRow() + 1, 1, archiveRows.length, archiveRows[0].length).setValues(archiveRows);
+  archiveSheet.getRange(2, 2, Math.max(archiveSheet.getLastRow() - 1, 1), 1).setNumberFormat('yyyy-mm-dd');
+
+  const maxColumns = Math.max(eventsSheet.getLastColumn(), header.length);
+  if (eventsSheet.getMaxRows() < keepRows.length + 1) {
+    eventsSheet.insertRowsAfter(eventsSheet.getMaxRows(), keepRows.length + 1 - eventsSheet.getMaxRows());
+  }
+  if (eventsSheet.getMaxColumns() < maxColumns) {
+    eventsSheet.insertColumnsAfter(eventsSheet.getMaxColumns(), maxColumns - eventsSheet.getMaxColumns());
+  }
+
+  eventsSheet.getRange(2, 1, Math.max(eventsSheet.getMaxRows() - 1, 1), maxColumns).clearContent();
+  if (keepRows.length) {
+    eventsSheet.getRange(2, 1, keepRows.length, header.length).setValues(keepRows);
+  }
+
+  seedSheetRowsIfEmpty(eventsSheet, getEventsSeedRows());
+  configureEventsSheetUi(eventsSheet);
+
+  console.log(`Archived ${archiveRows.length} past event row(s) from Events to ${CONFIG.sheetNames.eventsArchive}.`);
+  return {
+    archivedRows: archiveRows.length,
+    keptRows: keepRows.length,
+    examplesPreserved: examplesPreserved
+  };
+}
+
+function archivePastEventsIfDue(referenceDate, settings) {
+  const runtimeSettings = settings || loadRuntimeSettings();
+  if (!shouldArchiveEventsNow(referenceDate, runtimeSettings)) {
+    return { status: 'skipped_schedule', archivedRows: 0 };
+  }
+
+  const result = archivePastEvents(referenceDate);
+  return {
+    status: result.archivedRows ? 'archived' : 'no_changes',
+    archivedRows: result.archivedRows,
+    keptRows: result.keptRows,
+    examplesPreserved: result.examplesPreserved
+  };
+}
+
 function columnToLetter(columnNumber) {
   let column = columnNumber;
   let letter = '';
@@ -1982,6 +2231,14 @@ function monthlySetup() {
   const trackedFormIds = getTrackedFormIds(metadataSheet);
 
   const today = new Date();
+  try {
+    const archiveResult = archivePastEventsIfDue(today, runtimeSettings);
+    if (archiveResult.status === 'archived') {
+      console.log(`Archived ${archiveResult.archivedRows} past Events row(s) before monthly setup.`);
+    }
+  } catch (err) {
+    console.error('Failed to archive past Events rows: ' + err.message);
+  }
 
   const planDate = new Date(today);
   planDate.setMonth(today.getMonth() + 1);
@@ -2253,20 +2510,12 @@ function initializeProject() {
   let settingsSheet = ss.getSheetByName(CONFIG.sheetNames.settings);
   if (!settingsSheet) {
     settingsSheet = ss.insertSheet(CONFIG.sheetNames.settings);
-    settingsSheet.appendRow(['Key', 'Value', 'Notes']);
-    settingsSheet.getRange(1, 1, 1, 3).setFontWeight('bold');
-    settingsSheet.getRange(2, 1, 8, 3).setValues([
-      ['church_name', CONFIG.defaults.churchName, 'Used in form titles and notifications'],
-      ['time_zone', safeGetScriptTimeZone(), 'IANA timezone for event generation'],
-      ['forms_folder_id', CONFIG.ids.formsFolder, 'Drive folder where forms are moved after creation'],
-      ['admin_emails', CONFIG.ids.adminEmails.join(','), 'Comma-separated admin recipients'],
-      ['roles', CONFIG.roles.join(','), 'Comma-separated ministry roles'],
-      ['form_creation_day', CONFIG.defaults.formCreationDay, 'Reserved for future time-driven setup'],
-      ['times_choices', CONFIG.defaults.timesChoices.join(','), 'Comma-separated willingness choices'],
-      ['availability_sheet_suffix', CONFIG.defaults.availabilitySheetSuffix, 'Suffix used for monthly availability tabs']
-    ]);
+    settingsSheet.getRange(1, 1, 1, 3).setValues([getSettingsSeedRows()[0]]);
     console.log("Created Settings sheet.");
   }
+  settingsSheet.getRange(1, 1, 1, 3).setFontWeight('bold');
+  ensureSettingsSheetRows(settingsSheet, getSettingsSeedRows());
+  configureSettingsSheetUi(settingsSheet);
 
   const roleMigrationResult = maybeMigrateMemberRolesDuringSetup();
   if (roleMigrationResult && roleMigrationResult.status === 'migrated') {
@@ -2305,32 +2554,25 @@ function initializeProject() {
   // 5. Create the new Recurring sheet if no recurring configuration exists.
   if (!recurringSheet && !legacyRecurringSheet) {
     recurringSheet = ss.insertSheet(CONFIG.sheetNames.recurring);
-    recurringSheet.appendRow(['Enabled', 'Event', 'Frequency', 'Weekday', 'Week Of Month', 'Month', 'Day', 'Include In Form', 'Include In Schedule', 'Notes']);
-    recurringSheet.getRange(1, 1, 1, 10).setFontWeight('bold');
-    recurringSheet.getRange(2, 1, 4, 10).setValues([
-      [true, '', 'Weekly', 'Sunday', 'every', 'all', '', true, true, 'Default weekly Sunday schedule. Leave Event blank to show plain dates.'],
-      [false, 'Corporate Prayer', 'Monthly', 'Friday', 1, 'all', '', true, true, 'Enable if your church has a monthly prayer gathering'],
-      [false, 'Easter', 'Easter', '', '', 'all', '', true, true, 'Enable to include Easter automatically each year'],
-      [false, 'Christmas', 'Yearly', '', '', '12', 25, true, true, 'Enable to include Christmas automatically each year']
-    ]);
+    recurringSheet.getRange(1, 1, 1, 10).setValues([getRecurringSeedRows()[0]]);
+    seedSheetRowsIfEmpty(recurringSheet, getRecurringSeedRows());
     configureRecurringSheetUi(recurringSheet);
     console.log("Created Recurring sheet.");
   } else if (recurringSheet && sheetUsesFriendlyRecurringLayout(recurringSheet)) {
+    seedSheetRowsIfEmpty(recurringSheet, getRecurringSeedRows());
     configureRecurringSheetUi(recurringSheet);
   }
 
   // 6. Create the new Events sheet for month-specific additions/removals.
   if (!eventsSheet) {
     eventsSheet = ss.insertSheet(CONFIG.sheetNames.events);
-    eventsSheet.appendRow(['Enabled', 'Date', 'Event', 'Action', 'Recurring Event', 'Include In Form', 'Include In Schedule', 'Notes']);
-    eventsSheet.getRange(2, 1, 2, 8).setValues([
-      [false, new Date(2026, 3, 3), 'Good Friday', 'ADD', '', true, true, 'Example one-time event. Change the date, then check Enabled to use it.'],
-      [false, new Date(2026, 3, 3), 'Corporate Prayer', 'REMOVE', 'Corporate Prayer', true, true, 'Example: remove one recurring event date for a specific month.']
-    ]);
+    eventsSheet.getRange(1, 1, 1, 8).setValues([getEventsSeedRows()[0]]);
+    seedSheetRowsIfEmpty(eventsSheet, getEventsSeedRows());
     eventsSheet.getRange(1, 1, 1, 8).setFontWeight('bold');
     configureEventsSheetUi(eventsSheet);
     console.log("Created Events sheet.");
   } else if (sheetUsesFriendlyEventsLayout(eventsSheet)) {
+    seedSheetRowsIfEmpty(eventsSheet, getEventsSeedRows());
     configureEventsSheetUi(eventsSheet);
   }
   

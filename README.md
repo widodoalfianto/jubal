@@ -142,6 +142,8 @@ Behavior:
   - Sundays by default
   - plus any enabled recurring rules from `Recurring`
 - Then `Events` can remove or add one-off events for that specific month.
+- Past one-off events can be moved to `Events Archive` automatically during `monthlySetup()` based on the `events_archive_frequency` and `events_archive_month` settings.
+- Built-in example rows stay in `Events` as templates and are not archived.
 
 Admin workflows:
 - To move a recurring event (e.g. move Corporate Prayer to the 2nd Friday), add:
@@ -149,5 +151,9 @@ Admin workflows:
   - one `ADD` row for the new date
 - To add special events (Good Friday, retreat nights, Christmas Eve), add rows in `Events` for the relevant dates.
 - After editing the Availability sheet header manually, run `syncCurrentFormWithAvailability()` from the Apps Script editor to update the live form's date choices.
+
+Useful settings:
+- `events_archive_frequency`: `Off`, `Monthly`, `Quarterly`, or `Yearly`
+- `events_archive_month`: month to run yearly archiving, such as `January`
 
 This makes the Availability sheet header the authoritative source for the form choices and scheduling matrix, so manual edits are supported.

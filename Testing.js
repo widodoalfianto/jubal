@@ -409,7 +409,44 @@ function runUnitTests() {
     recordResult('getServiceDates:standardizedDisplay', true, 'Special events retain labels with standardized dates');
   } catch (e) { recordResult('getServiceDates:standardizedDisplay', false, e.message); }
 
+  try {
+    if (!shouldArchiveEventsNow(new Date(2026, 0, 15), { eventsArchiveFrequency: 'Yearly', eventsArchiveMonth: 'January' })) {
+      throw new Error('Yearly January archive should run in January');
+    }
+    if (shouldArchiveEventsNow(new Date(2026, 1, 15), { eventsArchiveFrequency: 'Yearly', eventsArchiveMonth: 'January' })) {
+      throw new Error('Yearly January archive should not run in February');
+    }
+    if (!shouldArchiveEventsNow(new Date(2026, 3, 15), { eventsArchiveFrequency: 'Quarterly', eventsArchiveMonth: 'January' })) {
+      throw new Error('Quarterly archive should run in April');
+    }
+    if (shouldArchiveEventsNow(new Date(2026, 4, 15), { eventsArchiveFrequency: 'Off', eventsArchiveMonth: 'January' })) {
+      throw new Error('Archive should not run when frequency is Off');
+    }
+    recordResult('eventsArchive:schedule', true, 'Archive cadence settings behave as expected');
+  } catch (e) { recordResult('eventsArchive:schedule', false, e.message); }
+
+  try {
+    deleteSheetIfExists(CONFIG.sheetNames.eventsArchive);
+    replaceSheetContents(CONFIG.sheetNames.events, getDefaultEventsSheetRows().concat([
+      [true, new Date(2026, 11, 24), 'Christmas Eve', 'ADD', '', true, true, 'Past real event'],
+      [true, new Date(2027, 0, 15), 'Vision Night', 'ADD', '', true, true, 'Current month event'],
+      [true, new Date(2027, 1, 10), 'Prayer Night', 'ADD', '', true, true, 'Future event']
+    ]));
+    const archiveResult = archivePastEventsIfDue(new Date(2027, 0, 15), { eventsArchiveFrequency: 'Yearly', eventsArchiveMonth: 'January' });
+    if (archiveResult.archivedRows !== 1) throw new Error('Expected exactly one past real event to be archived');
+
+    const eventsRows = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG.sheetNames.events).getDataRange().getDisplayValues();
+    const archiveRows = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG.sheetNames.eventsArchive).getDataRange().getDisplayValues();
+
+    if (!eventsRows.some(row => row.join('|').indexOf('Good Friday') !== -1)) throw new Error('Example Good Friday row should remain in Events');
+    if (!eventsRows.some(row => row.join('|').indexOf('Corporate Prayer') !== -1 && row.join('|').indexOf('REMOVE') !== -1)) throw new Error('Example Corporate Prayer row should remain in Events');
+    if (eventsRows.some(row => row.join('|').indexOf('Christmas Eve') !== -1)) throw new Error('Past real event should have been removed from Events');
+    if (!archiveRows.some(row => row.join('|').indexOf('Christmas Eve') !== -1)) throw new Error('Past real event should have been copied to Events Archive');
+    recordResult('eventsArchive:preserveExamples', true, JSON.stringify(archiveResult));
+  } catch (e) { recordResult('eventsArchive:preserveExamples', false, e.message); }
+
   deleteSheetIfExists(CONFIG.sheetNames.monthlyEvents);
+  deleteSheetIfExists(CONFIG.sheetNames.eventsArchive);
   replaceSheetContents(CONFIG.sheetNames.events, getDefaultEventsSheetRows());
   logDebug('info', 'Unit tests completed');
 }
@@ -457,7 +494,9 @@ function runIntegrationTests() {
     initializeProject();
     const dbSheet = ss.getSheetByName(CONFIG.sheetNames.ministryMembers);
     const runtimeSettings = loadRuntimeSettings();
-    if (!ss.getSheetByName(CONFIG.sheetNames.settings)) throw new Error('Settings sheet missing');
+    const settingsSheet = ss.getSheetByName(CONFIG.sheetNames.settings);
+    if (!settingsSheet) throw new Error('Settings sheet missing');
+    const settingsValues = settingsSheet.getRange(2, 1, settingsSheet.getLastRow() - 1, 1).getDisplayValues().flat();
     if (!ss.getSheetByName(CONFIG.sheetNames.recurring) && !ss.getSheetByName(CONFIG.sheetNames.recurringEvents)) {
       throw new Error('Recurring sheet missing');
     }
@@ -472,6 +511,9 @@ function runIntegrationTests() {
     }
     if (!dbSheet.getRange(2, 2).getFormula()) {
       throw new Error('Roles formula was not created in Ministry Members');
+    }
+    if (settingsValues.indexOf('events_archive_frequency') === -1 || settingsValues.indexOf('events_archive_month') === -1) {
+      throw new Error('Archive settings were not created in Settings');
     }
     recordResult('initializeProject:configSheets', true, 'Configuration sheets created');
   } catch (e) { recordResult('initializeProject:configSheets', false, e.message); }
@@ -565,7 +607,9 @@ function getDefaultSettingsSheetRows() {
     ['roles', CONFIG.roles.join(','), 'Comma-separated ministry roles'],
     ['form_creation_day', CONFIG.defaults.formCreationDay, 'Reserved for future time-driven setup'],
     ['times_choices', CONFIG.defaults.timesChoices.join(','), 'Comma-separated willingness choices'],
-    ['availability_sheet_suffix', CONFIG.defaults.availabilitySheetSuffix, 'Suffix used for monthly availability tabs']
+    ['availability_sheet_suffix', CONFIG.defaults.availabilitySheetSuffix, 'Suffix used for monthly availability tabs'],
+    ['events_archive_frequency', CONFIG.defaults.eventsArchiveFrequency, 'Off, Monthly, Quarterly, or Yearly'],
+    ['events_archive_month', CONFIG.defaults.eventsArchiveMonth, 'Month that yearly archiving should run, such as January']
   ];
 }
 
