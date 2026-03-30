@@ -542,6 +542,90 @@ function applyTableBordersToDataRange(sheet) {
   applyTableBorder(sheet, 1, 1, sheet.getLastRow(), sheet.getLastColumn());
 }
 
+function getMonthSheetNames() {
+  return [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'
+  ];
+}
+
+function isMonthSheetName(sheetName) {
+  return getMonthSheetNames().indexOf(String(sheetName || '').trim()) !== -1;
+}
+
+function getMonthSheetSortMetadata(sheetName, referenceDate) {
+  const monthIndex = getMonthSheetNames().indexOf(String(sheetName || '').trim());
+  const today = referenceDate ? new Date(referenceDate) : new Date();
+  const currentMonth = today.getMonth();
+  const forwardDistance = (monthIndex - currentMonth + 12) % 12;
+  const backwardDistance = (currentMonth - monthIndex + 12) % 12;
+
+  if (forwardDistance === 0) {
+    return { group: 1, rank: 0 };
+  }
+
+  if (forwardDistance > 0 && forwardDistance <= 6) {
+    return { group: 0, rank: -forwardDistance };
+  }
+
+  return { group: 2, rank: backwardDistance };
+}
+
+function sortMonthSheetsByRecency(sheets, referenceDate) {
+  return (sheets || []).slice().sort((left, right) => {
+    const a = getMonthSheetSortMetadata(left.getName(), referenceDate);
+    const b = getMonthSheetSortMetadata(right.getName(), referenceDate);
+
+    if (a.group !== b.group) return a.group - b.group;
+    if (a.rank !== b.rank) return a.rank - b.rank;
+    return left.getName().localeCompare(right.getName());
+  });
+}
+
+function reorderWorkbookSheets(referenceDate) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const originalActiveSheet = ss.getActiveSheet();
+  const allSheets = ss.getSheets();
+  const orderedNames = [];
+
+  const pushSheet = sheet => {
+    if (!sheet) return;
+    const name = sheet.getName();
+    if (orderedNames.indexOf(name) === -1) {
+      orderedNames.push(name);
+    }
+  };
+
+  pushSheet(ss.getSheetByName(CONFIG.sheetNames.ministryMembers));
+  sortMonthSheetsByRecency(allSheets.filter(sheet => isMonthSheetName(sheet.getName())), referenceDate).forEach(pushSheet);
+  pushSheet(ss.getSheetByName(CONFIG.sheetNames.recurring));
+  pushSheet(ss.getSheetByName(CONFIG.sheetNames.events));
+  allSheets
+    .filter(sheet => sheet.getName().startsWith('Form Responses'))
+    .forEach(pushSheet);
+  pushSheet(ss.getSheetByName(CONFIG.sheetNames.rolesConfig));
+  pushSheet(ss.getSheetByName(CONFIG.sheetNames.admins));
+  pushSheet(ss.getSheetByName(CONFIG.sheetNames.settings));
+  pushSheet(ss.getSheetByName(CONFIG.sheetNames.formMetadata));
+
+  allSheets.forEach(pushSheet);
+
+  orderedNames.forEach((sheetName, index) => {
+    const sheet = ss.getSheetByName(sheetName);
+    if (!sheet) return;
+    ss.setActiveSheet(sheet);
+    ss.moveActiveSheet(index + 1);
+  });
+
+  if (originalActiveSheet) {
+    try {
+      ss.setActiveSheet(originalActiveSheet);
+    } catch (error) {
+      console.warn('Unable to restore active sheet after reordering: ' + error.message);
+    }
+  }
+}
+
 function highlightExampleRows(sheet, notesColumnNumber) {
   if (!sheet || !notesColumnNumber || sheet.getLastRow() < 2 || sheet.getLastColumn() < 1) return;
 
@@ -2163,13 +2247,11 @@ function getRolesSeedRows(roles) {
     [false, 'MEDIA', 'Example role. Check Enabled if your church needs it.']
   ];
 
-  configuredRoles.forEach((role, index) => {
+  configuredRoles.forEach(role => {
     rows.push([
       true,
       role,
-      index === 0
-        ? 'Add new roles by adding a new row and checking Enabled. The system will use these names in the schedule and member checkboxes.'
-        : ''
+      ''
     ]);
   });
 
@@ -2183,7 +2265,7 @@ function configureRolesSheetUi(sheet) {
   sheet.setFrozenRows(1);
   setHeaderNotes(sheet, [
     'Check this when the role should be active in scheduling.',
-    'Role name shown in the schedule and on member role checkboxes.',
+    'Role name shown in the schedule and on member role checkboxes. To add a new role, add a new row, type the role name, and check Enabled.',
     'Optional note for admins.'
   ]);
   applyCheckboxColumn(sheet, 1, maxRows);
@@ -3037,6 +3119,7 @@ function runMonthlySetupInternal(options) {
     console.error('Failed to ensure legacy Events entries: ' + err.message);
   }
 
+  reorderWorkbookSheets(today);
   props.setProperty(propertyKey, new Date().toISOString());
   return {
     status: 'completed',
@@ -3354,6 +3437,8 @@ function initializeProject() {
     seedSheetRowsIfEmpty(eventsSheet, getEventsSeedRows());
     configureEventsSheetUi(eventsSheet);
   }
+
+  reorderWorkbookSheets();
   
   console.log("Initialization complete. You can now run monthlySetup().");
 }
