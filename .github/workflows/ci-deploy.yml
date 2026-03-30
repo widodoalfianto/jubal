@@ -125,6 +125,30 @@ jobs:
           fi
           printf '%s' "${CLASPRC_JSON}" > "$HOME/.clasprc.json"
 
+      - name: Validate clasp auth credentials
+        run: |
+          node -e '
+            const fs = require("fs");
+            const path = process.env.HOME + "/.clasprc.json";
+            const fail = (message) => { console.error(message); process.exit(1); };
+            let data;
+            try {
+              data = JSON.parse(fs.readFileSync(path, "utf8"));
+            } catch (error) {
+              fail("CLASPRC_JSON is not valid JSON.");
+            }
+            const token = data && data.tokens && data.tokens.default;
+            if (!token) {
+              fail("CLASPRC_JSON must contain tokens.default from ~/.clasprc.json.");
+            }
+            for (const key of ["client_id", "client_secret", "refresh_token", "access_token", "type"]) {
+              if (!token[key]) {
+                fail(`CLASPRC_JSON is missing tokens.default.${key}.`);
+              }
+            }
+            console.log("Validated ~/.clasprc.json structure for clasp.");
+          '
+
       - name: Push project to Apps Script
         run: clasp push --force
 
@@ -230,6 +254,30 @@ jobs:
             exit 1;
           fi
           printf '%s' "${CLASPRC_JSON}" > "$HOME/.clasprc.json"
+
+      - name: Validate clasp auth credentials
+        run: |
+          node -e '
+            const fs = require("fs");
+            const path = process.env.HOME + "/.clasprc.json";
+            const fail = (message) => { console.error(message); process.exit(1); };
+            let data;
+            try {
+              data = JSON.parse(fs.readFileSync(path, "utf8"));
+            } catch (error) {
+              fail("CLASPRC_JSON is not valid JSON.");
+            }
+            const token = data && data.tokens && data.tokens.default;
+            if (!token) {
+              fail("CLASPRC_JSON must contain tokens.default from ~/.clasprc.json.");
+            }
+            for (const key of ["client_id", "client_secret", "refresh_token", "access_token", "type"]) {
+              if (!token[key]) {
+                fail(`CLASPRC_JSON is missing tokens.default.${key}.`);
+              }
+            }
+            console.log("Validated ~/.clasprc.json structure for clasp.");
+          '
 
       - name: Push project to Apps Script
         run: clasp push --force
