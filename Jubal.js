@@ -1385,6 +1385,41 @@ function populateAnnualEvents(year) {
   for (let m = 0; m < 12; m++) ensureMonthlyEventsFor(year, m);
 }
 
+function getTrackedFormIds(metadataSheet) {
+  if (!metadataSheet || metadataSheet.getLastRow() < 1 || metadataSheet.getLastColumn() < 2) return [];
+
+  const values = metadataSheet.getRange(1, 2, metadataSheet.getLastRow(), 1).getValues().flat();
+  return values
+    .map(value => String(value || '').trim())
+    .filter(value => value && value.toLowerCase() !== 'form id')
+    .filter((value, index, arr) => arr.indexOf(value) === index);
+}
+
+function unlinkTrackedForms(formIds) {
+  (formIds || []).forEach(formId => {
+    try {
+      FormApp.openById(formId).removeDestination();
+      console.log("De-linked form with ID: " + formId);
+    } catch (e) {
+      console.log("Could not de-link or find form " + formId + ": " + e.message);
+    }
+  });
+}
+
+function deleteFormResponseSheets(ss) {
+  ss.getSheets().forEach(sheet => {
+    if (!sheet.getName().startsWith("Form Responses")) return;
+
+    const toDelete = sheet.getName();
+    try {
+      ss.deleteSheet(sheet);
+      console.log("Deleted old Form Responses tab: " + toDelete);
+    } catch (e) {
+      console.log("Skipped deleting Form Responses tab '" + toDelete + "': " + e.message);
+    }
+  });
+}
+
 function setupAvailability(sheetName, year, month) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const runtimeSettings = loadRuntimeSettings();
@@ -1485,6 +1520,7 @@ function monthlySetup() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const metadataSheet = ss.getSheetByName("Form Metadata") || ss.insertSheet("Form Metadata");
   const runtimeSettings = loadRuntimeSettings();
+  const trackedFormIds = getTrackedFormIds(metadataSheet);
 
   const today = new Date();
 
@@ -1538,27 +1574,9 @@ function monthlySetup() {
     metadataSheet.deleteRow(2);
   }
 
-  if (metadataSheet) {
-    const oldFormId = metadataSheet.getRange("B1").getValue(); // Get the old form ID from metadata
-    if (oldFormId) {
-      try {
-        const oldForm = FormApp.openById(oldFormId); // Open the form using the ID
-        oldForm.removeDestination(); // Remove the link to the spreadsheet
-        console.log("De-linked form with ID: " + oldFormId);
-      } catch (e) {
-        console.log("Could not de-link or find the old form: " + e.message);
-      }
-    }
-  }
+  unlinkTrackedForms(trackedFormIds);
+  deleteFormResponseSheets(ss);
 
-  const sheets = ss.getSheets();
-  sheets.forEach(sheet => {
-    if (sheet.getName().startsWith("Form Responses")) {
-      const toDelete = sheet.getName();
-      ss.deleteSheet(sheet);
-      console.log("Deleted old Form Responses tab: " + toDelete);
-    }
-  })
   createNewFormForMonth(planMonth, planYear, planMonthName);
   console.log(`Created new form for ${planMonthName}`);
 

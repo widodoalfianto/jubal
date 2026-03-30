@@ -176,6 +176,11 @@ function cleanupTestArtifacts(ss, testName, createdSheetName, monthName) {
       
       if (formName.includes(monthName)) {
         try {
+          try {
+            FormApp.openById(formId).removeDestination();
+          } catch (unlinkError) {
+            console.log(`⚠️ Could not remove destination from test form '${formName}': ${unlinkError.message}`);
+          }
           const file = DriveApp.getFileById(formId);
           file.setTrashed(true);
           console.log(`✅ Deleted test form '${formName}' from Drive.`);
@@ -193,8 +198,12 @@ function cleanupTestArtifacts(ss, testName, createdSheetName, monthName) {
   const sheets = ss.getSheets();
   for (const sheet of sheets) {
     if (sheet.getName().startsWith("Form Responses") && sheet.getLastRow() <= 1) {
-      ss.deleteSheet(sheet);
-      console.log(`✅ Deleted empty test sheet '${sheet.getName()}'.`);
+      try {
+        ss.deleteSheet(sheet);
+        console.log(`✅ Deleted empty test sheet '${sheet.getName()}'.`);
+      } catch (e) {
+        console.log(`⚠️ Could not delete linked test sheet '${sheet.getName()}': ${e.message}`);
+      }
     }
   }
 }
