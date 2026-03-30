@@ -203,8 +203,9 @@ function cleanupTestArtifacts(ss, testName, createdSheetName, monthName) {
 function runUnitTests() {
   initializeProject();
   resetTestResultsSheet();
+  deleteSheetIfExists(CONFIG.sheetNames.recurringEvents);
   replaceSheetContents(CONFIG.sheetNames.settings, getDefaultSettingsSheetRows());
-  replaceSheetContents(CONFIG.sheetNames.recurringEvents, getDefaultRecurringSheetRows());
+  replaceSheetContents(CONFIG.sheetNames.events, getDefaultEventsSheetRows());
   replaceSheetContents(CONFIG.sheetNames.monthlyEvents, getDefaultMonthlyEventsSheetRows());
 
   // parseUnavailableDates tests
@@ -293,25 +294,27 @@ function runUnitTests() {
   // getServiceDates tests
   try {
     const sd = getServiceDates(2026, 2); // March 2026
-    if (!Array.isArray(sd) || sd.length === 0) throw new Error('Expected non-empty array');
-    if (!sd.some(date => date.includes('Corporate Prayer'))) throw new Error('Expected default recurring Corporate Prayer event');
+    const expected = ['03/01', '03/08', '03/15', '03/22', '03/29'];
+    if (JSON.stringify(sd) !== JSON.stringify(expected)) throw new Error('Expected Sunday-only default schedule, got ' + JSON.stringify(sd));
     for (let i = 0; i < sd.length; i++) {
       if (!sd[i].match(/^\d{2}\/\d{2}/)) throw new Error('Service date not in MM/dd format: ' + sd[i]);
     }
-    recordResult('getServiceDates: March 2026', true, 'Service dates: ' + JSON.stringify(sd));
-  } catch (e) { recordResult('getServiceDates: March 2026', false, e.message); }
+    recordResult('getServiceDates: March 2026 default Sundays', true, 'Service dates: ' + JSON.stringify(sd));
+  } catch (e) { recordResult('getServiceDates: March 2026 default Sundays', false, e.message); }
 
   try {
-    const recurringRows = getDefaultRecurringSheetRows();
-    recurringRows[2][0] = false; // Disable corporate prayer
-    replaceSheetContents(CONFIG.sheetNames.recurringEvents, recurringRows);
+    const eventRows = getDefaultEventsSheetRows();
+    eventRows[2][0] = true; // Enable corporate prayer
+    replaceSheetContents(CONFIG.sheetNames.events, eventRows);
     const sd = getServiceDates(2026, 2);
-    if (sd.some(date => date.includes('Corporate Prayer'))) throw new Error('Corporate Prayer should be absent when recurring rule is disabled');
-    recordResult('getServiceDates:disableRecurringRule', true, 'Corporate Prayer disabled successfully');
-  } catch (e) { recordResult('getServiceDates:disableRecurringRule', false, e.message); }
+    if (!sd.some(date => date.indexOf('03/06 - Corporate Prayer') !== -1)) throw new Error('Corporate Prayer should appear when monthly recurring event is enabled');
+    recordResult('getServiceDates:monthlyRecurringEvent', true, 'Monthly recurring event enabled successfully');
+  } catch (e) { recordResult('getServiceDates:monthlyRecurringEvent', false, e.message); }
 
   try {
-    replaceSheetContents(CONFIG.sheetNames.recurringEvents, getDefaultRecurringSheetRows());
+    const eventRows = getDefaultEventsSheetRows();
+    eventRows[2][0] = true; // Enable corporate prayer for override test
+    replaceSheetContents(CONFIG.sheetNames.events, eventRows);
     replaceSheetContents(CONFIG.sheetNames.monthlyEvents, [
       ['Enabled', 'Year', 'Month', 'Date', 'Action', 'Label', 'Rule ID', 'Include In Form', 'Include In Schedule', 'Sort Order', 'Type', 'Notes'],
       [true, 2026, 3, '2026-03-06', 'REMOVE', 'Corporate Prayer', 'corporate_prayer', true, true, 10, 'override', 'Moved off first Friday'],
@@ -324,6 +327,19 @@ function runUnitTests() {
   } catch (e) { recordResult('getServiceDates:actionOverrides', false, e.message); }
 
   try {
+    const eventRows = getDefaultEventsSheetRows();
+    eventRows[3][0] = true; // Enable Easter
+    eventRows[4][0] = true; // Enable Christmas
+    replaceSheetContents(CONFIG.sheetNames.events, eventRows);
+    replaceSheetContents(CONFIG.sheetNames.monthlyEvents, getDefaultMonthlyEventsSheetRows());
+    const aprilDates = getServiceDates(2026, 3); // April 2026
+    const decemberDates = getServiceDates(2026, 11); // December 2026
+    if (!aprilDates.includes('04/05 - Easter')) throw new Error('Easter should appear when yearly event is enabled');
+    if (!decemberDates.includes('12/25 - Christmas')) throw new Error('Christmas should appear when yearly event is enabled');
+    recordResult('getServiceDates:yearlyRecurringEvents', true, 'Yearly recurring events enabled successfully');
+  } catch (e) { recordResult('getServiceDates:yearlyRecurringEvents', false, e.message); }
+
+  try {
     replaceSheetContents(CONFIG.sheetNames.monthlyEvents, [
       ['Year', 'Month', 'Date', 'Label', 'Type'],
       [2026, 5, '2026-05-15', 'LegacyEvent', 'legacy']
@@ -334,7 +350,10 @@ function runUnitTests() {
   } catch (e) { recordResult('getServiceDates:legacyMonthlyEvents', false, e.message); }
 
   try {
-    replaceSheetContents(CONFIG.sheetNames.recurringEvents, getDefaultRecurringSheetRows());
+    const eventRows = getDefaultEventsSheetRows();
+    eventRows[2][0] = true; // Enable corporate prayer
+    eventRows[3][0] = true; // Enable Easter
+    replaceSheetContents(CONFIG.sheetNames.events, eventRows);
     replaceSheetContents(CONFIG.sheetNames.monthlyEvents, getDefaultMonthlyEventsSheetRows());
     const sd = getServiceDates(2026, 3); // April 2026
     if (!sd.includes('04/03 - Corporate Prayer')) throw new Error('Corporate Prayer should be labeled');
@@ -390,7 +409,9 @@ function runIntegrationTests() {
   try {
     initializeProject();
     if (!ss.getSheetByName(CONFIG.sheetNames.settings)) throw new Error('Settings sheet missing');
-    if (!ss.getSheetByName(CONFIG.sheetNames.recurringEvents)) throw new Error('Recurring Events sheet missing');
+    if (!ss.getSheetByName(CONFIG.sheetNames.events) && !ss.getSheetByName(CONFIG.sheetNames.recurringEvents)) {
+      throw new Error('Events sheet missing');
+    }
     if (!ss.getSheetByName(CONFIG.sheetNames.monthlyEvents)) throw new Error('Monthly Events sheet missing');
     recordResult('initializeProject:configSheets', true, 'Configuration sheets created');
   } catch (e) { recordResult('initializeProject:configSheets', false, e.message); }
@@ -409,7 +430,7 @@ function runIntegrationTests() {
   // test: monthlySetup creates availability sheet and form metadata (smoke)
   try {
     replaceSheetContents(CONFIG.sheetNames.settings, getDefaultSettingsSheetRows());
-    replaceSheetContents(CONFIG.sheetNames.recurringEvents, getDefaultRecurringSheetRows());
+    replaceSheetContents(CONFIG.sheetNames.events, getDefaultEventsSheetRows());
     replaceSheetContents(CONFIG.sheetNames.monthlyEvents, getDefaultMonthlyEventsSheetRows());
     monthlySetup();
     recordResult('monthlySetup:smoke', true, 'monthlySetup executed');
@@ -458,6 +479,12 @@ function replaceSheetContents(sheetName, rows) {
   return sheet;
 }
 
+function deleteSheetIfExists(sheetName) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(sheetName);
+  if (sheet) ss.deleteSheet(sheet);
+}
+
 function getDefaultSettingsSheetRows() {
   return [
     ['Key', 'Value', 'Notes'],
@@ -472,13 +499,13 @@ function getDefaultSettingsSheetRows() {
   ];
 }
 
-function getDefaultRecurringSheetRows() {
+function getDefaultEventsSheetRows() {
   return [
-    ['Enabled', 'Rule ID', 'Label', 'Rule Type', 'Weekday', 'Ordinal', 'Month Filter', 'Day Of Month', 'Offset Days', 'Include In Form', 'Include In Schedule', 'Sort Order', 'Type'],
-    [true, 'sunday_service', '', 'every_weekday', 'Sunday', 'every', 'all', '', 0, true, true, 20, 'service'],
-    [true, 'corporate_prayer', 'Corporate Prayer', 'nth_weekday', 'Friday', 1, 'all', '', 0, true, true, 10, 'prayer'],
-    [true, 'easter', 'Easter', 'easter_offset', '', '', 'all', '', 0, true, true, 30, 'special'],
-    [true, 'christmas', 'Christmas', 'fixed_date', '', '', '12', 25, 0, true, true, 40, 'special']
+    ['Enabled', 'Rule ID', 'Label', 'Recurrence', 'Rule Type', 'Month', 'Weekday', 'Ordinal', 'Day Of Month', 'Offset Days', 'Include In Form', 'Include In Schedule', 'Sort Order', 'Type', 'Notes'],
+    [true, 'sunday_service', '', 'monthly', 'every_weekday', 'all', 'Sunday', 'every', '', 0, true, true, 20, 'service', 'Default weekly Sunday schedule'],
+    [false, 'corporate_prayer', 'Corporate Prayer', 'monthly', 'nth_weekday', 'all', 'Friday', 1, '', 0, true, true, 10, 'prayer', 'Enable if your church has a monthly prayer gathering'],
+    [false, 'easter', 'Easter', 'yearly', 'easter_offset', 'all', '', '', '', 0, true, true, 30, 'special', 'Enable to include Easter automatically each year'],
+    [false, 'christmas', 'Christmas', 'yearly', 'fixed_date', '12', '', '', 25, 0, true, true, 40, 'special', 'Enable to include Christmas automatically each year']
   ];
 }
 

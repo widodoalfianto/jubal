@@ -38,7 +38,12 @@ Update the `CONFIG` object with your specific details:
 
 ### 3. Initialization
 1. In the Apps Script editor, select the `initializeProject` function from the dropdown menu.
-2. Click **Run**. This will create the necessary sheets ("Ministry Members", "Form Metadata") and populate them with dummy data.
+2. Click **Run**. This will create the necessary sheets, including:
+   - `Ministry Members`
+   - `Form Metadata`
+   - `Settings`
+   - `Events`
+   - `Monthly Events`
 3. **Important**: Delete the dummy row in "Ministry Members" and add your actual team members.
 
 ### 4. Triggers
@@ -79,21 +84,66 @@ Pull requests are welcome! Feel free to fork the repo, make changes, and open a 
 
 ---
 
+## Events
+
+The default schedule is now just **all Sundays** for the target month.
+
+Use the `Events` sheet to add optional recurring events that differ by church. This is the preferred configuration sheet for:
+- monthly recurring events, such as first-Friday `Corporate Prayer`
+- yearly recurring events, such as `Christmas`
+- movable yearly events, such as `Easter`
+
+Recommended columns:
+- **Enabled**
+- **Rule ID**
+- **Label**
+- **Recurrence**: `monthly` or `yearly`
+- **Rule Type**: `every_weekday`, `nth_weekday`, `fixed_date`, or `easter_offset`
+- **Month**: `all`, a month number, or a month name
+- **Weekday**
+- **Ordinal**
+- **Day Of Month**
+- **Offset Days**
+- **Include In Form**
+- **Include In Schedule**
+- **Sort Order**
+- **Type**
+- **Notes**
+
+Examples:
+- Sundays every month:
+  - `TRUE | sunday_service |  | monthly | every_weekday | all | Sunday | every |  | 0 | TRUE | TRUE | 20 | service |`
+- First Friday Corporate Prayer:
+  - `TRUE | corporate_prayer | Corporate Prayer | monthly | nth_weekday | all | Friday | 1 |  | 0 | TRUE | TRUE | 10 | prayer |`
+- Easter:
+  - `TRUE | easter | Easter | yearly | easter_offset | all |  |  |  | 0 | TRUE | TRUE | 30 | special |`
+- Christmas:
+  - `TRUE | christmas | Christmas | yearly | fixed_date | 12 |  |  | 25 | 0 | TRUE | TRUE | 40 | special |`
+
+Legacy note:
+- Existing `Recurring Events` sheets are still read for backward compatibility.
+
 ## Monthly Events & Overrides
 
 You can override or add special events for any month using the `Monthly Events` sheet (create it in the spreadsheet). Columns:
 - **Year**: numeric year (e.g. `2026`)
 - **Month**: numeric month (`1`-`12`) or month name (`March`)
 - **Date**: a date for the event (supports `MM/DD`, `YYYY-MM-DD`, `Mar 29`, etc.)
+- **Action**: `ADD` or `REMOVE`
 - **Label**: short label (e.g. `Easter`, `Christmas`, `Corporate Prayer`)
+- **Rule ID**: optional stable identifier for matching an existing recurring event
 - **Type**: optional free-text field
 
 Behavior:
-- If `Monthly Events` contains entries for a year+month, those entries become the authoritative service dates for that month.
-- Otherwise the script falls back to the default algorithm (first Friday as Corporate Prayer + all Sundays), or uses an existing Availability sheet header if present.
+- The script starts from:
+  - Sundays by default
+  - plus any enabled recurring rules from `Events`
+- Then `Monthly Events` can remove or add one-off events for that specific month.
 
 Admin workflows:
-- To override a single event (e.g. move Corporate Prayer to the 2nd Friday), add a row to `Monthly Events` with the desired date and label for that month.
+- To move a recurring event (e.g. move Corporate Prayer to the 2nd Friday), add:
+  - one `REMOVE` row for the original date
+  - one `ADD` row for the new date
 - To add special events (Easter, Christmas), add rows in `Monthly Events` for the relevant months.
 - After editing the Availability sheet header manually, run `syncCurrentFormWithAvailability()` from the Apps Script editor to update the live form's date choices.
 

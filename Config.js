@@ -11,6 +11,7 @@ const CONFIG = {
     ministryMembers: "Ministry Members",
     formMetadata: "Form Metadata",
     settings: "Settings",
+    events: "Events",
     recurringEvents: "Recurring Events",
     monthlyEvents: "Monthly Events"
   },
