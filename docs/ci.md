@@ -67,8 +67,8 @@ Tenant registry
 - The default file includes:
   - `dev-full`
   - `dev-minimal`
-  - `my-church`
-  - `friend-church`
+  - `OC`
+  - `MRV`
 - Each tenant includes:
   - `name`
   - `stage` (`dev` or `prod`)
@@ -79,9 +79,9 @@ Example:
 
 ```json
 {
-  "name": "my-church",
+  "name": "OC",
   "stage": "prod",
-  "scriptIdVar": "SCRIPT_ID_MY_CHURCH",
+  "scriptIdVar": "SCRIPT_ID_OC",
   "runRemoteTests": false
 }
 ```
