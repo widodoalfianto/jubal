@@ -2726,6 +2726,31 @@ function ensureRoleCheckboxColumns(sheet, roles) {
   }
 }
 
+function normalizeMinistryMembersColumnValidation(sheet, roles) {
+  if (!sheet || sheet.getMaxRows() < 2) return;
+
+  const memberColumns = getMinistryMembersColumnMap(sheet);
+  const dataRowCount = sheet.getMaxRows() - 1;
+  const plainTextColumns = [
+    memberColumns.name,
+    memberColumns.dates,
+    memberColumns.times,
+    memberColumns.comments,
+    memberColumns.roles,
+    memberColumns.canonicalName
+  ].filter((column, index, columns) => column && columns.indexOf(column) === index);
+
+  plainTextColumns.forEach(columnNumber => {
+    sheet.getRange(2, columnNumber, dataRowCount, 1).clearDataValidations();
+  });
+
+  const roleColumnMap = getConfiguredMemberRoleColumnMap(sheet);
+  const roleColumnNumbers = Object.keys(roleColumnMap).map(key => roleColumnMap[key]);
+  roleColumnNumbers.forEach(columnNumber => {
+    sheet.getRange(2, columnNumber, dataRowCount, 1).insertCheckboxes();
+  });
+}
+
 function syncRoleCheckboxesFromRolesColumn(sheet, roles) {
   if (!sheet || !roles || !roles.length || sheet.getLastRow() < 2) return;
 
@@ -2786,6 +2811,7 @@ function ensureRolesFormulaColumn(sheet, roles) {
 function configureMinistryMembersRoles(sheet, roles) {
   if (!sheet || !roles || !roles.length) return;
   ensureRoleCheckboxColumns(sheet, roles);
+  normalizeMinistryMembersColumnValidation(sheet, roles);
   syncRoleCheckboxesFromRolesColumn(sheet, roles);
   ensureRolesFormulaColumn(sheet, roles);
   applySheetTheme(sheet);
