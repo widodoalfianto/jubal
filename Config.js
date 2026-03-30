@@ -10,6 +10,7 @@ const CONFIG = {
   sheetNames: {
     ministryMembers: "Ministry Members",
     formMetadata: "Form Metadata",
+    reconciliation: "Reconciliation",
     settings: "Settings",
     recurring: "Recurring",
     events: "Events",
@@ -38,6 +39,8 @@ const CONFIG = {
     formCreationDay: 8,
     timesChoices: ["1", "2", "3", "4", "5"],
     availabilitySheetSuffix: "Availability",
+    adminReminderEnabled: true,
+    adminReminderDay: 5,
     eventsArchiveFrequency: "Yearly",
     eventsArchiveMonth: "January"
   },

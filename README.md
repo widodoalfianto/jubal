@@ -55,6 +55,9 @@ Set up the automation triggers in the Apps Script dashboard (Clock icon on the l
    - Function: `monthlySetup` | Event Source: `Time-driven` | Type: `Month timer` (e.g., 8th of the month).
 2. **Database Update**:
    - Function: `onFormSubmit` | Event Source: `From spreadsheet` | Event Type: `On form submit`.
+3. **Admin Reminder Check**:
+   - Function: `sendAdminPlanningReminderIfDue` | Event Source: `Time-driven` | Type: `Day timer`
+   - This can run daily. The script only sends a reminder when the date matches your `admin_reminder_day` setting.
 
 ---
 
@@ -153,6 +156,9 @@ Admin workflows:
 - After editing the Availability sheet header manually, run `syncCurrentFormWithAvailability()` from the Apps Script editor to update the live form's date choices.
 
 Useful settings:
+- `admin_emails`: comma-separated email addresses for all admins who should receive reminders and alerts
+- `admin_reminder_enabled`: `TRUE` or `FALSE`
+- `admin_reminder_day`: day of month to remind admins to review next month before the form is created
 - `events_archive_frequency`: `Off`, `Monthly`, `Quarterly`, or `Yearly`
 - `events_archive_month`: month to run yearly archiving, such as `January`
 

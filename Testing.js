@@ -426,6 +426,22 @@ function runUnitTests() {
   } catch (e) { recordResult('eventsArchive:schedule', false, e.message); }
 
   try {
+    if (getAdminRecipientString({ adminEmails: ['admin1@example.com', ' admin2@example.com '] }) !== 'admin1@example.com,admin2@example.com') {
+      throw new Error('Admin email list did not normalize correctly');
+    }
+    const reminder = buildAdminPlanningReminder(new Date(2026, 2, 5), {
+      churchName: 'Jubal Test',
+      timeZone: safeGetScriptTimeZone(),
+      adminEmails: ['admin@example.com']
+    });
+    if (reminder.subject.indexOf('April 2026') === -1) throw new Error('Reminder subject should reference next month');
+    if (reminder.body.indexOf('Recurring schedule') === -1 || reminder.body.indexOf('One-time events and changes') === -1) {
+      throw new Error('Reminder body should guide admins to Recurring and Events');
+    }
+    recordResult('adminReminder:content', true, reminder.subject);
+  } catch (e) { recordResult('adminReminder:content', false, e.message); }
+
+  try {
     deleteSheetIfExists(CONFIG.sheetNames.eventsArchive);
     replaceSheetContents(CONFIG.sheetNames.events, getDefaultEventsSheetRows().concat([
       [true, new Date(2026, 11, 24), 'Christmas Eve', 'ADD', '', true, true, 'Past real event'],
@@ -514,6 +530,9 @@ function runIntegrationTests() {
     }
     if (settingsValues.indexOf('events_archive_frequency') === -1 || settingsValues.indexOf('events_archive_month') === -1) {
       throw new Error('Archive settings were not created in Settings');
+    }
+    if (settingsValues.indexOf('admin_reminder_enabled') === -1 || settingsValues.indexOf('admin_reminder_day') === -1) {
+      throw new Error('Admin reminder settings were not created in Settings');
     }
     recordResult('initializeProject:configSheets', true, 'Configuration sheets created');
   } catch (e) { recordResult('initializeProject:configSheets', false, e.message); }
@@ -606,6 +625,8 @@ function getDefaultSettingsSheetRows() {
     ['admin_emails', CONFIG.ids.adminEmails.join(','), 'Comma-separated admin recipients'],
     ['roles', CONFIG.roles.join(','), 'Comma-separated ministry roles'],
     ['form_creation_day', CONFIG.defaults.formCreationDay, 'Reserved for future time-driven setup'],
+    ['admin_reminder_enabled', CONFIG.defaults.adminReminderEnabled, 'TRUE or FALSE. When TRUE, send planning reminders to admins.'],
+    ['admin_reminder_day', CONFIG.defaults.adminReminderDay, 'Day of month to send the admin planning reminder for next month.'],
     ['times_choices', CONFIG.defaults.timesChoices.join(','), 'Comma-separated willingness choices'],
     ['availability_sheet_suffix', CONFIG.defaults.availabilitySheetSuffix, 'Suffix used for monthly availability tabs'],
     ['events_archive_frequency', CONFIG.defaults.eventsArchiveFrequency, 'Off, Monthly, Quarterly, or Yearly'],

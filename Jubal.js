@@ -346,6 +346,8 @@ function getDefaultRuntimeSettings() {
     formCreationDay: CONFIG.defaults.formCreationDay,
     timesChoices: CONFIG.defaults.timesChoices.slice(),
     availabilitySheetSuffix: CONFIG.defaults.availabilitySheetSuffix,
+    adminReminderEnabled: CONFIG.defaults.adminReminderEnabled,
+    adminReminderDay: CONFIG.defaults.adminReminderDay,
     eventsArchiveFrequency: CONFIG.defaults.eventsArchiveFrequency,
     eventsArchiveMonth: CONFIG.defaults.eventsArchiveMonth
   };
@@ -365,6 +367,8 @@ function loadRuntimeSettings() {
     formCreationDay: toIntegerOrDefault(raw.form_creation_day, defaults.formCreationDay),
     timesChoices: parseCsv(raw.times_choices),
     availabilitySheetSuffix: String(raw.availability_sheet_suffix || defaults.availabilitySheetSuffix).trim() || defaults.availabilitySheetSuffix,
+    adminReminderEnabled: parseBooleanLike(raw.admin_reminder_enabled, defaults.adminReminderEnabled),
+    adminReminderDay: toIntegerOrDefault(raw.admin_reminder_day, Math.max(toIntegerOrDefault(raw.form_creation_day, defaults.formCreationDay) - 3, 1)),
     eventsArchiveFrequency: String(raw.events_archive_frequency || defaults.eventsArchiveFrequency).trim() || defaults.eventsArchiveFrequency,
     eventsArchiveMonth: String(raw.events_archive_month || defaults.eventsArchiveMonth).trim() || defaults.eventsArchiveMonth
   };
@@ -372,10 +376,49 @@ function loadRuntimeSettings() {
   if (!settings.adminEmails.length) settings.adminEmails = defaults.adminEmails.slice();
   if (!settings.roles.length) settings.roles = defaults.roles.slice();
   if (!settings.timesChoices.length) settings.timesChoices = defaults.timesChoices.slice();
+  if (settings.adminReminderDay < 1) settings.adminReminderDay = 1;
   if (!settings.eventsArchiveFrequency) settings.eventsArchiveFrequency = defaults.eventsArchiveFrequency;
   if (!settings.eventsArchiveMonth) settings.eventsArchiveMonth = defaults.eventsArchiveMonth;
 
   return settings;
+}
+
+function getAdminRecipientList(settings) {
+  const runtimeSettings = settings || loadRuntimeSettings();
+  return (runtimeSettings.adminEmails || [])
+    .map(email => String(email || '').trim())
+    .filter(Boolean);
+}
+
+function getAdminRecipientString(settings) {
+  return getAdminRecipientList(settings).join(',');
+}
+
+function sendEmailToAdmins(subject, body, settings) {
+  const recipients = getAdminRecipientString(settings);
+  if (!recipients) return false;
+  MailApp.sendEmail(recipients, subject, body);
+  return true;
+}
+
+function formatHumanDateTime(value, timeZone) {
+  if (!value) return '';
+  const parsed = Object.prototype.toString.call(value) === '[object Date]' ? value : new Date(value);
+  if (isNaN(parsed.getTime())) return String(value);
+  return Utilities.formatDate(parsed, timeZone || safeGetScriptTimeZone(), "MMMM d, yyyy 'at' h:mm a z");
+}
+
+function getSheetRangeUrl(sheet, rowIndex, startColumnLetter, endColumnLetter) {
+  if (!sheet) return '';
+  const ss = sheet.getParent();
+  const start = `${startColumnLetter || 'A'}${rowIndex || 1}`;
+  const end = `${endColumnLetter || startColumnLetter || 'A'}${rowIndex || 1}`;
+  return `${ss.getUrl()}#gid=${sheet.getSheetId()}&range=${start}:${end}`;
+}
+
+function getSheetUrlByName(sheetName) {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
+  return sheet ? getSheetRangeUrl(sheet, 1, 'A', 'A') : SpreadsheetApp.getActiveSpreadsheet().getUrl();
 }
 
 function getAvailabilitySheetNameForMonthName(monthName, settings) {
@@ -998,12 +1041,57 @@ function getBuiltInFallbackServiceDates(year, month, timeZone) {
  * Add a reconciliation entry for admin review.
  * Columns: timestamp | formId | submittedName | matchedCanonical | parseErrors | actionRequired | alerted
  */
+function getFriendlyReconciliationAction(actionRequired, name) {
+  const normalized = String(actionRequired || '').trim();
+  if (!normalized) return 'Please review this item.';
+  if (normalized.indexOf('New member added') === 0) {
+    return `${name || 'This person'} was added as a new row because the submission did not match anyone already listed in Ministry Members. Please check whether this is a brand new person or a duplicate/spelling variation.`;
+  }
+  return normalized;
+}
+
+function buildReconciliationAlertPayload(rowsToAlert, sheet, settings) {
+  const runtimeSettings = settings || loadRuntimeSettings();
+  const sheetLink = getSheetRangeUrl(sheet, 1, 'A', 'G');
+  const membersLink = getSheetUrlByName(CONFIG.sheetNames.ministryMembers);
+  const items = rowsToAlert.map((item, index) => {
+    const row = item.row;
+    const submittedAt = formatHumanDateTime(row[0], runtimeSettings.timeZone);
+    const name = String(row[2] || '').trim() || 'Unknown name';
+    const parseErrors = String(row[4] || '').trim();
+    const action = getFriendlyReconciliationAction(row[5], name);
+    const rowLink = getSheetRangeUrl(sheet, item.idx, 'A', 'G');
+
+    const lines = [
+      `${index + 1}. ${name}`,
+      `Submitted: ${submittedAt}`,
+      `What needs review: ${action}`
+    ];
+    if (parseErrors) lines.push(`Dates we could not understand: ${parseErrors}`);
+    lines.push(`Open this item: ${rowLink}`);
+    return lines.join('\n');
+  });
+
+  const itemLabel = rowsToAlert.length === 1 ? 'item' : 'items';
+  return {
+    subject: `Jubal: ${rowsToAlert.length} ${itemLabel} need${rowsToAlert.length === 1 ? 's' : ''} review`,
+    body: [
+      `Please review the following ${itemLabel} in Jubal:`,
+      '',
+      items.join('\n\n'),
+      '',
+      `Reconciliation sheet: ${sheetLink}`,
+      `Ministry Members sheet: ${membersLink}`
+    ].join('\n')
+  };
+}
+
 function addReconciliationEntry(e, submittedName, matchedCanonical, parseErrors, actionRequired) {
   try {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
-    let sheet = ss.getSheetByName('Reconciliation');
+    let sheet = ss.getSheetByName(CONFIG.sheetNames.reconciliation);
     if (!sheet) {
-      sheet = ss.insertSheet('Reconciliation');
+      sheet = ss.insertSheet(CONFIG.sheetNames.reconciliation);
       sheet.appendRow(['timestamp', 'formId', 'submittedName', 'matchedCanonical', 'parseErrors', 'actionRequired', 'alerted']);
     }
 
@@ -1030,7 +1118,7 @@ function addReconciliationEntry(e, submittedName, matchedCanonical, parseErrors,
 function sendReconciliationAlert(sheet, rowIndex) {
   try {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
-    if (!sheet) sheet = ss.getSheetByName('Reconciliation');
+    if (!sheet) sheet = ss.getSheetByName(CONFIG.sheetNames.reconciliation);
     if (!sheet) return;
 
     const lastRow = sheet.getLastRow();
@@ -1051,20 +1139,9 @@ function sendReconciliationAlert(sheet, rowIndex) {
 
     if (!rowsToAlert.length) return;
 
-    const bodyLines = rowsToAlert.map(r => {
-      const ts = r.row[0];
-      const formId = r.row[1];
-      const name = r.row[2];
-      const canon = r.row[3];
-      const errs = r.row[4];
-      const action = r.row[5];
-      return `- ${ts}: ${name} (canonical: ${canon}) — ${errs} — ${action}`;
-    });
-
-    const subject = 'Jubal Reconciliation Alert — ' + rowsToAlert.length + ' item(s)';
-    const body = 'The following reconciliation items need attention:\n\n' + bodyLines.join('\n');
-    const recipients = loadRuntimeSettings().adminEmails.join(',');
-    if (recipients) MailApp.sendEmail(recipients, subject, body);
+    const email = buildReconciliationAlertPayload(rowsToAlert, sheet, loadRuntimeSettings());
+    const sent = sendEmailToAdmins(email.subject, email.body);
+    if (!sent) return;
 
     // Mark alerted timestamp
     rowsToAlert.forEach(r => {
@@ -1320,10 +1397,9 @@ function createNewFormForMonth(month, year, monthName) {
                   "You can access and fill out the form using the following link:\n" + responderUrl + "\n\n" +
                   "If you need to edit the form, use the following link:\n" + editUrl + "\n\n" +
                   "Please submit your availability as soon as possible.";
-  const recipientEmail = runtimeSettings.adminEmails.join(",");
 
   // Send email
-  if (recipientEmail) MailApp.sendEmail(recipientEmail, emailSubject, emailBody);
+  sendEmailToAdmins(emailSubject, emailBody, runtimeSettings);
 
   if (runtimeSettings.formsFolder) {
     try {
@@ -1451,6 +1527,75 @@ function syncCurrentFormWithAvailability() {
   const planMonthName = planDate.toLocaleString('default', { month: 'long' });
   const sheetName = getAvailabilitySheetNameForMonthName(planMonthName);
   syncFormWithSheet(formId.toString(), sheetName);
+}
+
+function getAdminReminderPropertyKey(referenceDate) {
+  const date = referenceDate ? new Date(referenceDate) : new Date();
+  const planDate = new Date(date);
+  planDate.setMonth(planDate.getMonth() + 1);
+  return `adminReminderSent:${planDate.getFullYear()}-${('0' + (planDate.getMonth() + 1)).slice(-2)}`;
+}
+
+function buildAdminPlanningReminder(referenceDate, settings) {
+  const runtimeSettings = settings || loadRuntimeSettings();
+  const today = referenceDate ? new Date(referenceDate) : new Date();
+  const planDate = new Date(today);
+  planDate.setMonth(planDate.getMonth() + 1);
+
+  const planMonthName = Utilities.formatDate(planDate, runtimeSettings.timeZone, 'MMMM yyyy');
+  const subject = `Jubal Reminder: Please review ${planMonthName}`;
+  const bodyLines = [
+    `Please review the schedule setup for ${planMonthName}.`,
+    '',
+    'Before the monthly form is created, please check these areas:',
+    `- Recurring schedule: ${getSheetUrlByName(CONFIG.sheetNames.recurring)}`,
+    `- One-time events and changes: ${getSheetUrlByName(CONFIG.sheetNames.events)}`,
+    `- Ministry members and role updates: ${getSheetUrlByName(CONFIG.sheetNames.ministryMembers)}`,
+    '',
+    'Recommended checklist:',
+    '- Confirm your normal recurring events are correct.',
+    '- Add any special events, cancellations, or moved dates for next month.',
+    '- Add any new members or update role checkboxes as needed.',
+    '',
+    'Once that looks right, the next month form and availability sheet can be generated by the monthly setup trigger.',
+    `Reminder date: ${formatHumanDateTime(today, runtimeSettings.timeZone)}`
+  ];
+
+  return {
+    subject: subject,
+    body: bodyLines.join('\n')
+  };
+}
+
+function sendAdminPlanningReminderIfDue() {
+  const runtimeSettings = loadRuntimeSettings();
+  if (!runtimeSettings.adminReminderEnabled) return { status: 'disabled' };
+  if (!getAdminRecipientList(runtimeSettings).length) return { status: 'no_recipients' };
+
+  const today = new Date();
+  if (today.getDate() !== runtimeSettings.adminReminderDay) {
+    return { status: 'not_due_today', day: today.getDate(), reminderDay: runtimeSettings.adminReminderDay };
+  }
+
+  const propertyKey = getAdminReminderPropertyKey(today);
+  const props = PropertiesService.getScriptProperties();
+  if (props.getProperty(propertyKey)) {
+    return { status: 'already_sent', key: propertyKey };
+  }
+
+  const reminder = buildAdminPlanningReminder(today, runtimeSettings);
+  const sent = sendEmailToAdmins(reminder.subject, reminder.body, runtimeSettings);
+  if (!sent) return { status: 'no_recipients' };
+
+  props.setProperty(propertyKey, new Date().toISOString());
+  return { status: 'sent', key: propertyKey };
+}
+
+function sendAdminPlanningReminderNow() {
+  const runtimeSettings = loadRuntimeSettings();
+  const reminder = buildAdminPlanningReminder(new Date(), runtimeSettings);
+  const sent = sendEmailToAdmins(reminder.subject, reminder.body, runtimeSettings);
+  return { status: sent ? 'sent' : 'no_recipients' };
 }
 
 /**
@@ -1727,6 +1872,8 @@ function getSettingsSeedRows() {
     ['admin_emails', CONFIG.ids.adminEmails.join(','), 'Comma-separated admin recipients'],
     ['roles', CONFIG.roles.join(','), 'Comma-separated ministry roles'],
     ['form_creation_day', CONFIG.defaults.formCreationDay, 'Reserved for future time-driven setup'],
+    ['admin_reminder_enabled', CONFIG.defaults.adminReminderEnabled, 'TRUE or FALSE. When TRUE, send planning reminders to admins.'],
+    ['admin_reminder_day', CONFIG.defaults.adminReminderDay, 'Day of month to send the admin planning reminder for next month.'],
     ['times_choices', CONFIG.defaults.timesChoices.join(','), 'Comma-separated willingness choices'],
     ['availability_sheet_suffix', CONFIG.defaults.availabilitySheetSuffix, 'Suffix used for monthly availability tabs'],
     ['events_archive_frequency', CONFIG.defaults.eventsArchiveFrequency, 'Off, Monthly, Quarterly, or Yearly'],
@@ -1776,6 +1923,20 @@ function configureSettingsSheetUi(sheet) {
       valueRange.setDataValidation(
         SpreadsheetApp.newDataValidation()
           .requireValueInList(['Off', 'Monthly', 'Quarterly', 'Yearly'], true)
+          .setAllowInvalid(false)
+          .build()
+      );
+    } else if (key === 'admin_reminder_enabled') {
+      valueRange.setDataValidation(
+        SpreadsheetApp.newDataValidation()
+          .requireValueInList(['TRUE', 'FALSE'], true)
+          .setAllowInvalid(false)
+          .build()
+      );
+    } else if (key === 'admin_reminder_day') {
+      valueRange.setDataValidation(
+        SpreadsheetApp.newDataValidation()
+          .requireNumberBetween(1, 28)
           .setAllowInvalid(false)
           .build()
       );
