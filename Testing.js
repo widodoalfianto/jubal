@@ -15,7 +15,6 @@ function runFullSystemTest() {
   console.log("\n--- Step 1: Initial Setup ---");
   // Ensure the project is initialized (creates sheets if missing)
   initializeProject();
-  migrateMemberRolesToCheckboxes();
   
   // Verify sheets exist
   if (!ss.getSheetByName(CONFIG.sheetNames.ministryMembers)) throw new Error("Ministry Members sheet missing");
@@ -457,6 +456,7 @@ function runIntegrationTests() {
   try {
     initializeProject();
     const dbSheet = ss.getSheetByName(CONFIG.sheetNames.ministryMembers);
+    const runtimeSettings = loadRuntimeSettings();
     if (!ss.getSheetByName(CONFIG.sheetNames.settings)) throw new Error('Settings sheet missing');
     if (!ss.getSheetByName(CONFIG.sheetNames.recurring) && !ss.getSheetByName(CONFIG.sheetNames.recurringEvents)) {
       throw new Error('Recurring sheet missing');
@@ -467,18 +467,19 @@ function runIntegrationTests() {
     if (!dbSheet || dbSheet.getRange(1, 6).getValue() !== CONFIG.sheetHeaders.canonicalName) {
       throw new Error('Canonical Name header missing from Ministry Members');
     }
-    recordResult('initializeProject:configSheets', true, 'Configuration sheets created');
-  } catch (e) { recordResult('initializeProject:configSheets', false, e.message); }
-
-  try {
-    const dbSheet = ss.getSheetByName(CONFIG.sheetNames.ministryMembers);
-    const runtimeSettings = loadRuntimeSettings();
-    const result = migrateMemberRolesToCheckboxes();
     if (dbSheet.getRange(1, getRoleCheckboxStartColumn()).getValue() !== runtimeSettings.roles[0]) {
       throw new Error('Role checkbox headers were not created in Ministry Members');
     }
     if (!dbSheet.getRange(2, 2).getFormula()) {
       throw new Error('Roles formula was not created in Ministry Members');
+    }
+    recordResult('initializeProject:configSheets', true, 'Configuration sheets created');
+  } catch (e) { recordResult('initializeProject:configSheets', false, e.message); }
+
+  try {
+    const result = migrateMemberRolesToCheckboxes();
+    if (!result || (result.status !== 'already_configured' && result.status !== 'migrated')) {
+      throw new Error('Expected migrateMemberRolesToCheckboxes to be idempotent');
     }
     recordResult('migrateMemberRolesToCheckboxes:smoke', true, JSON.stringify(result));
   } catch (e) { recordResult('migrateMemberRolesToCheckboxes:smoke', false, e.message); }

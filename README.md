@@ -45,8 +45,9 @@ Update the `CONFIG` object with your specific details:
    - `Recurring`
    - `Events`
 3. **Important**: Delete the dummy row in "Ministry Members" and add your actual team members.
-4. If you want to switch role entry to checkboxes, run `migrateMemberRolesToCheckboxes()` once.
-   This adds role checkbox columns starting in column `G` and makes the `Roles` column auto-generate from those checkboxes.
+4. `initializeProject()` now also tries to switch role entry to checkboxes when it is safe.
+   It adds role checkbox columns starting in column `G` and makes the `Roles` column auto-generate from those checkboxes.
+5. If `initializeProject()` skips that migration because columns `G+` already contain data, you can review the sheet and run `migrateMemberRolesToCheckboxes()` manually.
 
 ### 4. Triggers
 Set up the automation triggers in the Apps Script dashboard (Clock icon on the left):

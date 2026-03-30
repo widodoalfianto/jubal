@@ -1738,6 +1738,19 @@ function migrateMemberRolesToCheckboxes() {
   const roles = loadRuntimeSettings().roles;
   if (!roles.length) throw new Error('No roles configured in Settings.');
 
+  if (hasRoleCheckboxColumnsConfigured(sheet, roles)) {
+    configureMinistryMembersRoles(sheet, roles);
+    SpreadsheetApp.flush();
+    console.log('Role checkbox migration skipped because the sheet is already configured.');
+    return {
+      status: 'already_configured',
+      roles: roles,
+      startColumn: columnToLetter(getRoleCheckboxStartColumn()),
+      migratedRows: 0,
+      memberRows: Math.max(sheet.getLastRow() - 1, 0)
+    };
+  }
+
   const summary = summarizeRoleMigration(sheet, roles);
   if (summary.conflictingCells > 0) {
     throw new Error(
@@ -1755,12 +1768,30 @@ function migrateMemberRolesToCheckboxes() {
   );
 
   return {
-    status: 'ok',
+    status: 'migrated',
     roles: roles,
     startColumn: columnToLetter(getRoleCheckboxStartColumn()),
     migratedRows: summary.rowsWithLegacyRoles,
     memberRows: summary.memberRows
   };
+}
+
+function maybeMigrateMemberRolesDuringSetup() {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG.sheetNames.ministryMembers);
+  if (!sheet) return { status: 'skipped', reason: 'missing_sheet' };
+
+  const roles = loadRuntimeSettings().roles;
+  if (!roles.length) return { status: 'skipped', reason: 'missing_roles' };
+
+  try {
+    return migrateMemberRolesToCheckboxes();
+  } catch (error) {
+    console.warn('Skipping automatic role checkbox migration during initializeProject: ' + error.message);
+    return {
+      status: 'skipped_conflict',
+      reason: error.message
+    };
+  }
 }
 
 function getMemberRolesFromRow(row, configuredRoles) {
@@ -2165,6 +2196,13 @@ function initializeProject() {
       ['availability_sheet_suffix', CONFIG.defaults.availabilitySheetSuffix, 'Suffix used for monthly availability tabs']
     ]);
     console.log("Created Settings sheet.");
+  }
+
+  const roleMigrationResult = maybeMigrateMemberRolesDuringSetup();
+  if (roleMigrationResult && roleMigrationResult.status === 'migrated') {
+    console.log('Initialized role checkbox workflow in Ministry Members.');
+  } else if (roleMigrationResult && roleMigrationResult.status === 'already_configured') {
+    console.log('Role checkbox workflow already configured in Ministry Members.');
   }
 
   // 4. Migrate legacy sheet names to the friendlier go-forward names when possible.
