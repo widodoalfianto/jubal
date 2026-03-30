@@ -34,7 +34,7 @@ To use this workflow for your own ministry, follow these steps:
 Update the `CONFIG` object with your specific details:
 - **`ids.formsFolder`**: The ID of a Google Drive folder where monthly forms will be stored.
 - **`ids.adminEmails`**: Starter admin emails used as a fallback until the `Admins` sheet is set up.
-- **`roles`**: Update the array with the specific roles in your ministry (e.g., "WL", "Keys", "Media").
+- **`roles`**: Starter roles used to seed the `Roles` sheet on first setup.
 
 ### 3. Initialization
 1. In the Apps Script editor, select the `initializeProject` function from the dropdown menu.
@@ -43,13 +43,15 @@ Update the `CONFIG` object with your specific details:
    - `Form Metadata`
    - `Settings`
    - `Admins`
+   - `Roles`
    - `Recurring`
    - `Events`
 3. **Important**: Delete the dummy row in "Ministry Members" and add your actual team members.
 4. `initializeProject()` now also tries to switch role entry to checkboxes when it is safe.
    It adds role checkbox columns starting in column `G` and makes the `Roles` column auto-generate from those checkboxes.
 5. If `initializeProject()` skips that migration because columns `G+` already contain data, you can review the sheet and run `migrateMemberRolesToCheckboxes()` manually.
-6. Use the `Admins` sheet to add or remove notification recipients with checkboxes and email validation. The old `admin_emails` setting remains as a fallback.
+6. Use the `Admins` sheet to add or remove notification recipients with checkboxes and email validation.
+7. Use the `Roles` sheet to add or disable ministry roles. The system uses that sheet to build the role checkboxes in `Ministry Members`.
 
 ### 4. Triggers
 Set up the automation triggers in the Apps Script dashboard (Clock icon on the left):
@@ -150,7 +152,7 @@ Behavior:
   - Sundays by default
   - plus any enabled recurring rules from `Recurring`
 - Then `Events` can remove or add one-off events for that specific month.
-- Past one-off events can be moved to `Events Archive` automatically during `monthlySetup()` based on the `events_archive_frequency` and `events_archive_month` settings.
+- Past one-off events can be moved to `Events Archive` automatically during `monthlySetup()` based on the `events_archive_frequency` setting.
 - Built-in example rows stay in `Events` as templates and are not archived.
 
 Admin workflows:
@@ -172,12 +174,29 @@ Columns:
 
 This is the preferred self-service place for managing notification recipients. Admins can simply add a new row, enter the email address, and check **Enabled**.
 
+## Roles
+
+Use the `Roles` sheet to control which ministry roles are active.
+
+Columns:
+- **Enabled**: check this when the role should be active
+- **Role**: role name shown in schedules and member role checkboxes
+- **Notes**: optional admin-facing note
+
+To add a new role, add a new row and check **Enabled**. The next setup/update cycle will sync that role into `Ministry Members`.
+
 Useful settings:
-- `admin_emails`: legacy fallback if the `Admins` sheet is not being used yet
+- `time_zone`: time zone used for event generation and reminder emails
 - `admin_reminder_enabled`: `TRUE` or `FALSE`
 - `admin_reminder_day`: day of month to remind admins to review next month before the form is created
 - `form_creation_day`: the day of month when the daily `monthlySetup` trigger should actually create the next month form and availability sheet
+- `times_choices`: the choices shown in the form question for how many times someone is willing to serve
 - `events_archive_frequency`: `Off`, `Monthly`, `Quarterly`, or `Yearly`
-- `events_archive_month`: month to run yearly archiving, such as `January`
+- `forms_folder_id`: only change this if you want future monthly forms stored in a different Drive folder
+
+Archive timing:
+- `Monthly`: archives old one-time events on the 1st day of each month
+- `Quarterly`: archives on January 1, April 1, July 1, and October 1
+- `Yearly`: archives on January 1
 
 This makes the Availability sheet header the authoritative source for the form choices and scheduling matrix, so manual edits are supported.

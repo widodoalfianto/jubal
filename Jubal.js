@@ -294,6 +294,18 @@ function normalizeEmailList(values) {
     });
 }
 
+function normalizeRoleList(values) {
+  const seen = {};
+  return parseCsv(values)
+    .map(role => String(role || '').trim())
+    .filter(role => {
+      const normalized = role.toUpperCase();
+      if (!normalized || seen[normalized]) return false;
+      seen[normalized] = true;
+      return true;
+    });
+}
+
 function parseBooleanLike(value, fallback) {
   if (value === null || value === undefined || value === '') return fallback;
   if (typeof value === 'boolean') return value;
@@ -308,6 +320,13 @@ function parseBooleanLike(value, fallback) {
 function toIntegerOrDefault(value, fallback) {
   const parsed = parseInt(value, 10);
   return isNaN(parsed) ? fallback : parsed;
+}
+
+function clampDayOfMonthSetting(value, fallback) {
+  const parsed = toIntegerOrDefault(value, fallback);
+  if (parsed < 1) return 1;
+  if (parsed > 28) return 28;
+  return parsed;
 }
 
 function isBlankRow(row) {
@@ -370,6 +389,28 @@ function loadAdminEmailsFromSheet() {
   return normalizeEmailList(emails);
 }
 
+function loadRolesFromSheet() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(CONFIG.sheetNames.rolesConfig);
+  if (!sheet || sheet.getLastRow() < 2) return [];
+
+  const headerMap = getSheetHeaderMap(sheet);
+  if (!Object.prototype.hasOwnProperty.call(headerMap, 'role')) return [];
+
+  const rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getValues();
+  const roles = rows
+    .map(row => {
+      const enabled = Object.prototype.hasOwnProperty.call(headerMap, 'enabled')
+        ? parseBooleanLike(getValueByHeader(row, headerMap, ['Enabled'], false), false)
+        : true;
+      const role = String(getValueByHeader(row, headerMap, ['Role'], '') || '').trim();
+      return enabled && role ? role : '';
+    })
+    .filter(Boolean);
+
+  return normalizeRoleList(roles);
+}
+
 function getDefaultRuntimeSettings() {
   return {
     churchName: CONFIG.defaults.churchName,
@@ -382,8 +423,7 @@ function getDefaultRuntimeSettings() {
     availabilitySheetSuffix: CONFIG.defaults.availabilitySheetSuffix,
     adminReminderEnabled: CONFIG.defaults.adminReminderEnabled,
     adminReminderDay: CONFIG.defaults.adminReminderDay,
-    eventsArchiveFrequency: CONFIG.defaults.eventsArchiveFrequency,
-    eventsArchiveMonth: CONFIG.defaults.eventsArchiveMonth
+    eventsArchiveFrequency: CONFIG.defaults.eventsArchiveFrequency
   };
 }
 
@@ -391,38 +431,43 @@ function loadRuntimeSettings() {
   const defaults = getDefaultRuntimeSettings();
   const raw = loadKeyValueSheet(CONFIG.sheetNames.settings);
   const sheetAdminEmails = loadAdminEmailsFromSheet();
+  const sheetRoles = loadRolesFromSheet();
   if (!Object.keys(raw).length) {
     if (sheetAdminEmails.length) {
       const fallbackDefaults = Object.assign({}, defaults);
       fallbackDefaults.adminEmails = sheetAdminEmails;
+      if (sheetRoles.length) fallbackDefaults.roles = sheetRoles;
+      return fallbackDefaults;
+    }
+    if (sheetRoles.length) {
+      const fallbackDefaults = Object.assign({}, defaults);
+      fallbackDefaults.roles = sheetRoles;
       return fallbackDefaults;
     }
     return defaults;
   }
 
   const configuredAdminEmails = normalizeEmailList(raw.admin_emails);
+  const configuredRoles = normalizeRoleList(raw.roles);
 
   const settings = {
     churchName: String(raw.church_name || defaults.churchName).trim() || defaults.churchName,
     timeZone: String(raw.time_zone || defaults.timeZone).trim() || defaults.timeZone,
     formsFolder: String(raw.forms_folder_id || defaults.formsFolder).trim() || defaults.formsFolder,
     adminEmails: sheetAdminEmails.length ? sheetAdminEmails : configuredAdminEmails,
-    roles: parseCsv(raw.roles),
-    formCreationDay: toIntegerOrDefault(raw.form_creation_day, defaults.formCreationDay),
+    roles: sheetRoles.length ? sheetRoles : configuredRoles,
+    formCreationDay: clampDayOfMonthSetting(raw.form_creation_day, defaults.formCreationDay),
     timesChoices: parseCsv(raw.times_choices),
     availabilitySheetSuffix: String(raw.availability_sheet_suffix || defaults.availabilitySheetSuffix).trim() || defaults.availabilitySheetSuffix,
     adminReminderEnabled: parseBooleanLike(raw.admin_reminder_enabled, defaults.adminReminderEnabled),
-    adminReminderDay: toIntegerOrDefault(raw.admin_reminder_day, Math.max(toIntegerOrDefault(raw.form_creation_day, defaults.formCreationDay) - 3, 1)),
-    eventsArchiveFrequency: String(raw.events_archive_frequency || defaults.eventsArchiveFrequency).trim() || defaults.eventsArchiveFrequency,
-    eventsArchiveMonth: String(raw.events_archive_month || defaults.eventsArchiveMonth).trim() || defaults.eventsArchiveMonth
+    adminReminderDay: clampDayOfMonthSetting(raw.admin_reminder_day, Math.max(clampDayOfMonthSetting(raw.form_creation_day, defaults.formCreationDay) - 3, 1)),
+    eventsArchiveFrequency: String(raw.events_archive_frequency || defaults.eventsArchiveFrequency).trim() || defaults.eventsArchiveFrequency
   };
 
   if (!settings.adminEmails.length) settings.adminEmails = defaults.adminEmails.slice();
   if (!settings.roles.length) settings.roles = defaults.roles.slice();
   if (!settings.timesChoices.length) settings.timesChoices = defaults.timesChoices.slice();
-  if (settings.adminReminderDay < 1) settings.adminReminderDay = 1;
   if (!settings.eventsArchiveFrequency) settings.eventsArchiveFrequency = defaults.eventsArchiveFrequency;
-  if (!settings.eventsArchiveMonth) settings.eventsArchiveMonth = defaults.eventsArchiveMonth;
 
   return settings;
 }
@@ -460,6 +505,72 @@ function formatDayOfMonthHuman(day) {
   if (mod10 === 2) return `${parsed}nd`;
   if (mod10 === 3) return `${parsed}rd`;
   return `${parsed}th`;
+}
+
+function getDayOfMonthDropdownValues() {
+  const values = [];
+  for (let i = 1; i <= 28; i++) values.push(String(i));
+  return values;
+}
+
+function getTimeZoneOptions() {
+  return normalizeRoleList([
+    safeGetScriptTimeZone(),
+    'UTC',
+    'America/Los_Angeles',
+    'America/Denver',
+    'America/Phoenix',
+    'America/Chicago',
+    'America/New_York',
+    'America/Anchorage',
+    'Pacific/Honolulu',
+    'America/Toronto',
+    'America/Vancouver',
+    'America/Mexico_City',
+    'America/Sao_Paulo',
+    'Europe/London',
+    'Europe/Dublin',
+    'Europe/Paris',
+    'Europe/Berlin',
+    'Europe/Madrid',
+    'Europe/Rome',
+    'Africa/Johannesburg',
+    'Asia/Dubai',
+    'Asia/Kolkata',
+    'Asia/Bangkok',
+    'Asia/Singapore',
+    'Asia/Manila',
+    'Asia/Hong_Kong',
+    'Asia/Tokyo',
+    'Asia/Seoul',
+    'Australia/Sydney',
+    'Pacific/Auckland'
+  ]);
+}
+
+function getThemeForSheet(sheetName) {
+  if (!sheetName) return null;
+  const themeKey = Object.keys(CONFIG.sheetNames).find(key => CONFIG.sheetNames[key] === sheetName);
+  return themeKey && CONFIG.themes[themeKey] ? CONFIG.themes[themeKey] : null;
+}
+
+function applySheetTheme(sheet) {
+  if (!sheet) return;
+  const theme = getThemeForSheet(sheet.getName());
+  if (!theme) return;
+
+  try {
+    sheet.setTabColor(theme.tab || null);
+  } catch (err) {
+    console.warn('Unable to set tab color for ' + sheet.getName() + ': ' + err.message);
+  }
+
+  if (sheet.getLastColumn() < 1) return;
+  const headerRange = sheet.getRange(1, 1, 1, sheet.getLastColumn());
+  headerRange
+    .setBackground(theme.header || null)
+    .setFontColor(theme.text || '#000000')
+    .setFontWeight('bold');
 }
 
 function getSheetRangeUrl(sheet, rowIndex, startColumnLetter, endColumnLetter) {
@@ -578,21 +689,21 @@ function normalizeArchiveFrequency(value) {
   return 'yearly';
 }
 
-function getArchiveTriggerMonths(frequency, archiveMonth) {
+function getArchiveTriggerMonths(frequency) {
   const normalizedFrequency = normalizeArchiveFrequency(frequency);
-  const monthNumber = parseMonthNumber(archiveMonth);
 
   if (normalizedFrequency === 'off') return [];
   if (normalizedFrequency === 'monthly') return [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
   if (normalizedFrequency === 'quarterly') return [1, 4, 7, 10];
-  return [monthNumber || 1];
+  return [1];
 }
 
 function shouldArchiveEventsNow(referenceDate, settings) {
   const runtimeSettings = settings || loadRuntimeSettings();
-  const triggerMonths = getArchiveTriggerMonths(runtimeSettings.eventsArchiveFrequency, runtimeSettings.eventsArchiveMonth);
-  const currentMonth = (referenceDate || new Date()).getMonth() + 1;
-  return triggerMonths.indexOf(currentMonth) !== -1;
+  const triggerMonths = getArchiveTriggerMonths(runtimeSettings.eventsArchiveFrequency);
+  const now = referenceDate || new Date();
+  const currentMonth = now.getMonth() + 1;
+  return now.getDate() === 1 && triggerMonths.indexOf(currentMonth) !== -1;
 }
 
 function slugifyRuleId(value, fallback) {
@@ -653,6 +764,12 @@ function sheetUsesFriendlyAdminsLayout(sheet) {
   const headerMap = getSheetHeaderMap(sheet);
   return Object.prototype.hasOwnProperty.call(headerMap, 'enabled') &&
     Object.prototype.hasOwnProperty.call(headerMap, 'email');
+}
+
+function sheetUsesFriendlyRolesLayout(sheet) {
+  const headerMap = getSheetHeaderMap(sheet);
+  return Object.prototype.hasOwnProperty.call(headerMap, 'enabled') &&
+    Object.prototype.hasOwnProperty.call(headerMap, 'role');
 }
 
 function getConfiguredRecurringSheet() {
@@ -1153,6 +1270,7 @@ function addReconciliationEntry(e, submittedName, matchedCanonical, parseErrors,
     if (!sheet) {
       sheet = ss.insertSheet(CONFIG.sheetNames.reconciliation);
       sheet.appendRow(['timestamp', 'formId', 'submittedName', 'matchedCanonical', 'parseErrors', 'actionRequired', 'alerted']);
+      applySheetTheme(sheet);
     }
 
     const ts = new Date().toISOString();
@@ -1245,6 +1363,7 @@ function formatAvailabilityDisplayName(name) {
 
 function updateDatabase(e) {
   try {
+    syncConfiguredMemberRoles();
     const databaseSS = SpreadsheetApp.getActiveSpreadsheet();
     const databaseSheet = databaseSS.getSheetByName(CONFIG.sheetNames.ministryMembers);
     const databaseData = databaseSheet.getDataRange().getValues();
@@ -1624,12 +1743,14 @@ function buildAdminPlanningReminder(referenceDate, settings) {
     'Before the monthly form is created, please check these areas:',
     `- Recurring schedule: ${getSheetUrlByName(CONFIG.sheetNames.recurring)}`,
     `- One-time events and changes: ${getSheetUrlByName(CONFIG.sheetNames.events)}`,
+    `- Ministry roles: ${getSheetUrlByName(CONFIG.sheetNames.rolesConfig)}`,
     `- Ministry members and role updates: ${getSheetUrlByName(CONFIG.sheetNames.ministryMembers)}`,
     `- Admin contacts and notifications: ${getSheetUrlByName(CONFIG.sheetNames.admins)}`,
     '',
     'Recommended checklist:',
     '- Confirm your normal recurring events are correct.',
     '- Add any special events, cancellations, or moved dates for next month.',
+    '- Add or disable roles in the Roles sheet if your ministry roster changed.',
     '- Add any new members or update role checkboxes as needed.',
     '- Add or remove admin recipients in the Admins sheet if notification recipients need to change.',
     '',
@@ -1861,7 +1982,6 @@ function configureRecurringSheetUi(sheet) {
   if (!sheet) return;
   const maxRows = Math.max(sheet.getMaxRows() - 1, 1);
   sheet.setFrozenRows(1);
-  styleConfigHeader(sheet, ['#d9ead3', '#fce5cd', '#cfe2f3', '#cfe2f3', '#cfe2f3', '#fff2cc', '#fff2cc', '#d9ead3', '#d9ead3', '#ead1dc']);
   setHeaderNotes(sheet, [
     'Check this to use the row.',
     'Name shown on the form and schedule. Leave blank for plain Sunday dates.',
@@ -1882,6 +2002,7 @@ function configureRecurringSheetUi(sheet) {
   sheet.getRange(2, 7, maxRows, 1).setNumberFormat('0');
   applyCheckboxColumn(sheet, 8, maxRows);
   applyCheckboxColumn(sheet, 9, maxRows);
+  applySheetTheme(sheet);
   sheet.autoResizeColumns(1, Math.min(10, sheet.getLastColumn()));
 }
 
@@ -1889,7 +2010,6 @@ function configureEventsSheetUi(sheet) {
   if (!sheet) return;
   const maxRows = Math.max(sheet.getMaxRows() - 1, 1);
   sheet.setFrozenRows(1);
-  styleConfigHeader(sheet, ['#d9ead3', '#f4cccc', '#fce5cd', '#cfe2f3', '#cfe2f3', '#d9ead3', '#d9ead3', '#ead1dc']);
   setHeaderNotes(sheet, [
     'Check this to use the row.',
     'Use a real date cell. Recommended format: yyyy-mm-dd.',
@@ -1909,6 +2029,7 @@ function configureEventsSheetUi(sheet) {
   }
   applyCheckboxColumn(sheet, 6, maxRows);
   applyCheckboxColumn(sheet, 7, maxRows);
+  applySheetTheme(sheet);
   sheet.autoResizeColumns(1, Math.min(8, sheet.getLastColumn()));
 }
 
@@ -1941,7 +2062,6 @@ function configureAdminsSheetUi(sheet) {
   if (!sheet) return;
   const maxRows = Math.max(sheet.getMaxRows() - 1, 1);
   sheet.setFrozenRows(1);
-  styleConfigHeader(sheet, ['#d9ead3', '#fce5cd', '#cfe2f3', '#ead1dc']);
   setHeaderNotes(sheet, [
     'Check this when the admin should receive reminders and alerts.',
     'Optional display name for your team.',
@@ -1950,7 +2070,42 @@ function configureAdminsSheetUi(sheet) {
   ]);
   applyCheckboxColumn(sheet, 1, maxRows);
   applyEmailColumn(sheet, 3, maxRows);
+  applySheetTheme(sheet);
   sheet.autoResizeColumns(1, Math.min(4, sheet.getLastColumn()));
+}
+
+function getRolesSeedRows(roles) {
+  const configuredRoles = normalizeRoleList(roles && roles.length ? roles : CONFIG.roles);
+  const rows = [
+    ['Enabled', 'Role', 'Notes']
+  ];
+
+  configuredRoles.forEach((role, index) => {
+    rows.push([
+      true,
+      role,
+      index === 0
+        ? 'Add new roles by adding a new row and checking Enabled. The system will use these names in the schedule and member checkboxes.'
+        : ''
+    ]);
+  });
+
+  rows.push([false, 'MEDIA', 'Example role. Check Enabled if your church needs it.']);
+  return rows;
+}
+
+function configureRolesSheetUi(sheet) {
+  if (!sheet) return;
+  const maxRows = Math.max(sheet.getMaxRows() - 1, 1);
+  sheet.setFrozenRows(1);
+  setHeaderNotes(sheet, [
+    'Check this when the role should be active in scheduling.',
+    'Role name shown in the schedule and on member role checkboxes.',
+    'Optional note for admins.'
+  ]);
+  applyCheckboxColumn(sheet, 1, maxRows);
+  applySheetTheme(sheet);
+  sheet.autoResizeColumns(1, Math.min(3, sheet.getLastColumn()));
 }
 
 function getRecurringSeedRows() {
@@ -1994,17 +2149,14 @@ function getSettingsSeedRows() {
   return [
     ['Key', 'Value', 'Notes'],
     ['church_name', CONFIG.defaults.churchName, 'Used in form titles and notifications'],
-    ['time_zone', safeGetScriptTimeZone(), 'IANA timezone for event generation'],
-    ['forms_folder_id', CONFIG.ids.formsFolder, 'Drive folder where forms are moved after creation'],
-    ['admin_emails', CONFIG.ids.adminEmails.join(','), 'Legacy fallback only. Prefer the Admins sheet for a friendlier admin list.'],
-    ['roles', CONFIG.roles.join(','), 'Comma-separated ministry roles'],
+    ['time_zone', safeGetScriptTimeZone(), 'Time zone used for event generation and reminder emails'],
     ['form_creation_day', CONFIG.defaults.formCreationDay, 'Day of month when the daily monthlySetup trigger should create the next month form and availability sheet.'],
     ['admin_reminder_enabled', CONFIG.defaults.adminReminderEnabled, 'TRUE or FALSE. When TRUE, send planning reminders to admins.'],
     ['admin_reminder_day', CONFIG.defaults.adminReminderDay, 'Day of month to send the admin planning reminder for next month.'],
-    ['times_choices', CONFIG.defaults.timesChoices.join(','), 'Comma-separated willingness choices'],
+    ['times_choices', CONFIG.defaults.timesChoices.join(','), 'Choices shown in the form question for how many times someone is willing to serve this month.'],
     ['availability_sheet_suffix', CONFIG.defaults.availabilitySheetSuffix, 'Suffix used for monthly availability tabs'],
-    ['events_archive_frequency', CONFIG.defaults.eventsArchiveFrequency, 'Off, Monthly, Quarterly, or Yearly'],
-    ['events_archive_month', CONFIG.defaults.eventsArchiveMonth, 'Month that yearly archiving should run, such as January']
+    ['events_archive_frequency', CONFIG.defaults.eventsArchiveFrequency, 'Off, Monthly, Quarterly, or Yearly. Cleanup runs automatically on the first day of the new period.'],
+    ['forms_folder_id', CONFIG.ids.formsFolder, 'Only change this if you want new monthly forms to be stored in a different Drive folder.']
   ];
 }
 
@@ -2036,17 +2188,75 @@ function ensureSettingsSheetRows(sheet, rows) {
   }
 }
 
+function rewriteSettingsSheetRows(sheet, seedRows) {
+  if (!sheet || !seedRows || seedRows.length < 2) return;
+
+  const existing = {};
+  if (sheet.getLastRow() >= 2) {
+    const currentRows = sheet.getRange(2, 1, sheet.getLastRow() - 1, Math.min(3, sheet.getLastColumn())).getValues();
+    currentRows.forEach(row => {
+      const key = String(row[0] || '').trim().toLowerCase();
+      if (!key) return;
+      existing[key] = {
+        value: row[1],
+        notes: row[2]
+      };
+    });
+  }
+
+  const orderedRows = seedRows.slice(1).map(seedRow => {
+    const key = String(seedRow[0] || '').trim().toLowerCase();
+    const existingRow = existing[key];
+    const hasExistingValue = existingRow && existingRow.value !== '' && existingRow.value !== null && existingRow.value !== undefined;
+    const hasExistingNotes = existingRow && String(existingRow.notes || '').trim();
+    let value = hasExistingValue ? existingRow.value : seedRow[1];
+
+    if (key === 'form_creation_day' || key === 'admin_reminder_day') {
+      value = String(clampDayOfMonthSetting(value, seedRow[1]));
+    } else if (key === 'admin_reminder_enabled') {
+      value = parseBooleanLike(value, seedRow[1]) ? 'TRUE' : 'FALSE';
+    } else if (key === 'events_archive_frequency') {
+      const normalizedFrequency = normalizeArchiveFrequency(value);
+      value = normalizedFrequency.charAt(0).toUpperCase() + normalizedFrequency.slice(1);
+    }
+
+    return [
+      seedRow[0],
+      value,
+      hasExistingNotes ? existingRow.notes : seedRow[2]
+    ];
+  });
+
+  if (sheet.getMaxRows() < orderedRows.length + 1) {
+    sheet.insertRowsAfter(sheet.getMaxRows(), orderedRows.length + 1 - sheet.getMaxRows());
+  }
+
+  sheet.getRange(2, 1, Math.max(sheet.getMaxRows() - 1, 1), 3).clearContent();
+  sheet.getRange(2, 1, orderedRows.length, 3).setValues(orderedRows);
+}
+
 function configureSettingsSheetUi(sheet) {
   if (!sheet || sheet.getLastRow() < 2) return;
 
   sheet.setFrozenRows(1);
+  applySheetTheme(sheet);
   const rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, Math.min(2, sheet.getLastColumn())).getValues();
+  const formsFolderHighlight = '#fce5cd';
   rows.forEach((row, index) => {
     const key = String(row[0] || '').trim().toLowerCase();
     const valueRange = sheet.getRange(index + 2, 2);
     valueRange.clearDataValidations();
+    sheet.getRange(index + 2, 1, 1, Math.min(3, sheet.getLastColumn())).setBackground(null);
 
-    if (key === 'events_archive_frequency') {
+    if (key === 'time_zone') {
+      const timeZoneOptions = normalizeRoleList([String(valueRange.getValue() || '').trim()].concat(getTimeZoneOptions()));
+      valueRange.setDataValidation(
+        SpreadsheetApp.newDataValidation()
+          .requireValueInList(timeZoneOptions, true)
+          .setAllowInvalid(false)
+          .build()
+      );
+    } else if (key === 'events_archive_frequency') {
       valueRange.setDataValidation(
         SpreadsheetApp.newDataValidation()
           .requireValueInList(['Off', 'Monthly', 'Quarterly', 'Yearly'], true)
@@ -2056,7 +2266,7 @@ function configureSettingsSheetUi(sheet) {
     } else if (key === 'form_creation_day') {
       valueRange.setDataValidation(
         SpreadsheetApp.newDataValidation()
-          .requireNumberBetween(1, 28)
+          .requireValueInList(getDayOfMonthDropdownValues(), true)
           .setAllowInvalid(false)
           .build()
       );
@@ -2070,17 +2280,15 @@ function configureSettingsSheetUi(sheet) {
     } else if (key === 'admin_reminder_day') {
       valueRange.setDataValidation(
         SpreadsheetApp.newDataValidation()
-          .requireNumberBetween(1, 28)
+          .requireValueInList(getDayOfMonthDropdownValues(), true)
           .setAllowInvalid(false)
           .build()
       );
-    } else if (key === 'events_archive_month') {
-      valueRange.setDataValidation(
-        SpreadsheetApp.newDataValidation()
-          .requireValueInList(['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'], true)
-          .setAllowInvalid(false)
-          .build()
-      );
+    }
+
+    if (key === 'forms_folder_id') {
+      sheet.getRange(index + 2, 1, 1, Math.min(3, sheet.getLastColumn())).setBackground(formsFolderHighlight);
+      sheet.getRange(index + 2, 1).setFontWeight('bold');
     }
   });
 }
@@ -2100,6 +2308,8 @@ function ensureEventsArchiveSheet() {
     sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold');
     sheet.setFrozenRows(1);
   }
+
+  applySheetTheme(sheet);
 
   return sheet;
 }
@@ -2210,35 +2420,73 @@ function getRoleCheckboxStartColumn() {
   return 7; // A-F are core member fields, role checkboxes begin in column G.
 }
 
+function getConfiguredMemberRoleColumnMap(sheet) {
+  const map = {};
+  if (!sheet || sheet.getLastColumn() < getRoleCheckboxStartColumn()) return map;
+
+  const startColumn = getRoleCheckboxStartColumn();
+  const width = sheet.getLastColumn() - startColumn + 1;
+  if (width <= 0) return map;
+
+  const headers = sheet.getRange(1, startColumn, 1, width).getDisplayValues()[0];
+  headers.forEach((header, index) => {
+    const role = String(header || '').trim();
+    if (!role) return;
+    map[role.toUpperCase()] = startColumn + index;
+  });
+  return map;
+}
+
+function hasAnyRoleCheckboxHeaders(sheet) {
+  return Object.keys(getConfiguredMemberRoleColumnMap(sheet)).length > 0;
+}
+
 function ensureRoleCheckboxColumns(sheet, roles) {
   if (!sheet || !roles || !roles.length) return;
 
   const startColumn = getRoleCheckboxStartColumn();
-  const requiredLastColumn = startColumn + roles.length - 1;
-  if (sheet.getMaxColumns() < requiredLastColumn) {
-    sheet.insertColumnsAfter(sheet.getMaxColumns(), requiredLastColumn - sheet.getMaxColumns());
-  }
+  const roleColumnMap = getConfiguredMemberRoleColumnMap(sheet);
+  const usedColumns = Object.keys(roleColumnMap).map(key => roleColumnMap[key]);
+  let nextColumn = usedColumns.length ? Math.max.apply(null, usedColumns) + 1 : startColumn;
 
-  sheet.getRange(1, startColumn, 1, roles.length).setValues([roles]);
-  sheet.getRange(1, startColumn, 1, roles.length).setFontWeight('bold');
-  if (sheet.getMaxRows() > 1) {
-    sheet.getRange(2, startColumn, sheet.getMaxRows() - 1, roles.length).insertCheckboxes();
+  roles.forEach(role => {
+    const normalized = String(role || '').trim().toUpperCase();
+    if (!normalized || roleColumnMap[normalized]) return;
+
+    if (sheet.getMaxColumns() < nextColumn) {
+      sheet.insertColumnsAfter(sheet.getMaxColumns(), nextColumn - sheet.getMaxColumns());
+    }
+
+    sheet.getRange(1, nextColumn).setValue(role).setFontWeight('bold');
+    if (sheet.getMaxRows() > 1) {
+      sheet.getRange(2, nextColumn, sheet.getMaxRows() - 1, 1).insertCheckboxes();
+    }
+    roleColumnMap[normalized] = nextColumn;
+    nextColumn++;
+  });
+
+  const finalRoleColumnMap = getConfiguredMemberRoleColumnMap(sheet);
+  const finalColumns = Object.keys(finalRoleColumnMap).map(key => finalRoleColumnMap[key]);
+  if (finalColumns.length) {
+    const firstColumn = Math.min.apply(null, finalColumns);
+    const lastColumn = Math.max.apply(null, finalColumns);
+    sheet.autoResizeColumns(firstColumn, lastColumn - firstColumn + 1);
   }
-  sheet.autoResizeColumns(startColumn, roles.length);
 }
 
 function syncRoleCheckboxesFromRolesColumn(sheet, roles) {
   if (!sheet || !roles || !roles.length || sheet.getLastRow() < 2) return;
 
-  const startColumn = getRoleCheckboxStartColumn();
+  const roleColumnMap = getConfiguredMemberRoleColumnMap(sheet);
   const lastRow = sheet.getLastRow();
   const rolesText = sheet.getRange(2, 2, lastRow - 1, 1).getDisplayValues().flat();
-  const checkboxRange = sheet.getRange(2, startColumn, lastRow - 1, roles.length);
-  const checkboxValues = checkboxRange.getValues();
+  const activeRoleColumns = roles
+    .map(role => roleColumnMap[String(role || '').trim().toUpperCase()])
+    .filter(Boolean);
 
-  for (let i = 0; i < checkboxValues.length; i++) {
-    const existingChecks = checkboxValues[i];
-    const hasAnyChecked = existingChecks.some(value => value === true);
+  for (let i = 0; i < rolesText.length; i++) {
+    const rowNumber = i + 2;
+    const hasAnyChecked = activeRoleColumns.some(columnNumber => sheet.getRange(rowNumber, columnNumber).getValue() === true);
     if (hasAnyChecked) continue;
 
     const parsedRoles = String(rolesText[i] || '')
@@ -2247,10 +2495,15 @@ function syncRoleCheckboxesFromRolesColumn(sheet, roles) {
       .filter(Boolean);
     if (!parsedRoles.length) continue;
 
-    checkboxValues[i] = roles.map(role => parsedRoles.indexOf(String(role).trim().toUpperCase()) !== -1);
+    roles.forEach(role => {
+      const normalized = String(role || '').trim().toUpperCase();
+      const columnNumber = roleColumnMap[normalized];
+      if (!columnNumber) return;
+      if (parsedRoles.indexOf(normalized) !== -1) {
+        sheet.getRange(rowNumber, columnNumber).setValue(true);
+      }
+    });
   }
-
-  checkboxRange.setValues(checkboxValues);
 }
 
 function ensureRolesFormulaColumn(sheet, roles) {
@@ -2259,15 +2512,18 @@ function ensureRolesFormulaColumn(sheet, roles) {
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) return;
 
-  const startColumn = getRoleCheckboxStartColumn();
-  const endColumn = startColumn + roles.length - 1;
-  const headerRange = `${columnToLetter(startColumn)}$1:${columnToLetter(endColumn)}$1`;
+  const roleColumnMap = getConfiguredMemberRoleColumnMap(sheet);
+  const roleColumns = roles
+    .map(role => roleColumnMap[String(role || '').trim().toUpperCase()])
+    .filter(Boolean);
+  if (!roleColumns.length) return;
 
   const formulas = [];
   for (let row = 2; row <= lastRow; row++) {
-    const rowRange = `${columnToLetter(startColumn)}${row}:${columnToLetter(endColumn)}${row}`;
+    const headerRefs = roleColumns.map(column => `${columnToLetter(column)}$1`);
+    const rowRefs = roleColumns.map(column => `${columnToLetter(column)}${row}`);
     formulas.push([
-      `=IF(COUNTIF(${rowRange},TRUE)=0,"",TEXTJOIN(", ",TRUE,FILTER(${headerRange},${rowRange}=TRUE)))`
+      `=IF(COUNTIF({${rowRefs.join(',')}},TRUE)=0,"",TEXTJOIN(", ",TRUE,FILTER({${headerRefs.join(',')}},{${rowRefs.join(',')}}=TRUE)))`
     ]);
   }
 
@@ -2279,28 +2535,28 @@ function configureMinistryMembersRoles(sheet, roles) {
   ensureRoleCheckboxColumns(sheet, roles);
   syncRoleCheckboxesFromRolesColumn(sheet, roles);
   ensureRolesFormulaColumn(sheet, roles);
+  applySheetTheme(sheet);
 }
 
 function hasRoleCheckboxColumnsConfigured(sheet, roles) {
   if (!sheet || !roles || !roles.length) return false;
-
-  const startColumn = getRoleCheckboxStartColumn();
-  const requiredLastColumn = startColumn + roles.length - 1;
-  if (sheet.getLastColumn() < requiredLastColumn) return false;
-
-  const headers = sheet.getRange(1, startColumn, 1, roles.length).getDisplayValues()[0];
-  return roles.every((role, index) => String(headers[index] || '').trim() === String(role || '').trim());
+  const roleColumnMap = getConfiguredMemberRoleColumnMap(sheet);
+  return roles.every(role => roleColumnMap[String(role || '').trim().toUpperCase()]);
 }
 
 function ensureRolesFormulaForRow(sheet, rowNumber, roles) {
   if (!sheet || !roles || !roles.length || rowNumber < 2) return;
   if (!hasRoleCheckboxColumnsConfigured(sheet, roles)) return;
 
-  const startColumn = getRoleCheckboxStartColumn();
-  const endColumn = startColumn + roles.length - 1;
-  const headerRange = `${columnToLetter(startColumn)}$1:${columnToLetter(endColumn)}$1`;
-  const rowRange = `${columnToLetter(startColumn)}${rowNumber}:${columnToLetter(endColumn)}${rowNumber}`;
-  const formula = `=IF(COUNTIF(${rowRange},TRUE)=0,"",TEXTJOIN(", ",TRUE,FILTER(${headerRange},${rowRange}=TRUE)))`;
+  const roleColumnMap = getConfiguredMemberRoleColumnMap(sheet);
+  const roleColumns = roles
+    .map(role => roleColumnMap[String(role || '').trim().toUpperCase()])
+    .filter(Boolean);
+  if (!roleColumns.length) return;
+
+  const headerRefs = roleColumns.map(column => `${columnToLetter(column)}$1`);
+  const rowRefs = roleColumns.map(column => `${columnToLetter(column)}${rowNumber}`);
+  const formula = `=IF(COUNTIF({${rowRefs.join(',')}},TRUE)=0,"",TEXTJOIN(", ",TRUE,FILTER({${headerRefs.join(',')}},{${rowRefs.join(',')}}=TRUE)))`;
   sheet.getRange(rowNumber, 2).setFormula(formula);
 }
 
@@ -2350,7 +2606,7 @@ function migrateMemberRolesToCheckboxes() {
   if (!sheet) throw new Error('Ministry Members sheet not found.');
 
   const roles = loadRuntimeSettings().roles;
-  if (!roles.length) throw new Error('No roles configured in Settings.');
+  if (!roles.length) throw new Error(`No roles configured in ${CONFIG.sheetNames.rolesConfig}.`);
 
   if (hasRoleCheckboxColumnsConfigured(sheet, roles)) {
     configureMinistryMembersRoles(sheet, roles);
@@ -2358,6 +2614,19 @@ function migrateMemberRolesToCheckboxes() {
     console.log('Role checkbox migration skipped because the sheet is already configured.');
     return {
       status: 'already_configured',
+      roles: roles,
+      startColumn: columnToLetter(getRoleCheckboxStartColumn()),
+      migratedRows: 0,
+      memberRows: Math.max(sheet.getLastRow() - 1, 0)
+    };
+  }
+
+  if (hasAnyRoleCheckboxHeaders(sheet)) {
+    configureMinistryMembersRoles(sheet, roles);
+    SpreadsheetApp.flush();
+    console.log('Role checkbox columns refreshed from the Roles sheet.');
+    return {
+      status: 'updated_roles',
       roles: roles,
       startColumn: columnToLetter(getRoleCheckboxStartColumn()),
       migratedRows: 0,
@@ -2408,12 +2677,23 @@ function maybeMigrateMemberRolesDuringSetup() {
   }
 }
 
-function getMemberRolesFromRow(row, configuredRoles) {
+function syncConfiguredMemberRoles() {
+  const result = maybeMigrateMemberRolesDuringSetup();
+  if (result && result.status === 'skipped_conflict') {
+    console.warn('Role checkbox sync skipped: ' + result.reason);
+  }
+  return result;
+}
+
+function getMemberRolesFromRow(row, configuredRoles, roleColumnMap) {
   const roles = (configuredRoles || []).map(role => String(role || '').trim()).filter(Boolean);
   if (!row || !roles.length) return [];
 
-  const checkboxStartIndex = getRoleCheckboxStartColumn() - 1;
-  const checkboxRoles = roles.filter((role, index) => row[checkboxStartIndex + index] === true);
+  const normalizedColumnMap = roleColumnMap || {};
+  const checkboxRoles = roles.filter(role => {
+    const columnNumber = normalizedColumnMap[String(role || '').trim().toUpperCase()];
+    return columnNumber && row[columnNumber - 1] === true;
+  });
   if (checkboxRoles.length) {
     return checkboxRoles.map(role => role.toUpperCase());
   }
@@ -2522,6 +2802,7 @@ function clearByHeader(header) {
 function runMonthlySetupInternal(options) {
   const opts = options || {};
   const ss = SpreadsheetApp.getActiveSpreadsheet();
+  syncConfiguredMemberRoles();
   const metadataSheet = ss.getSheetByName("Form Metadata") || ss.insertSheet("Form Metadata");
   const runtimeSettings = loadRuntimeSettings();
   const trackedFormIds = getTrackedFormIds(metadataSheet);
@@ -2659,6 +2940,7 @@ function findFormResponseSheet() {
 
 function updateAvailability() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
+  syncConfiguredMemberRoles();
   const runtimeSettings = loadRuntimeSettings();
 
   console.log('--- STARTING updateAvailability ---');
@@ -2707,6 +2989,7 @@ function updateAvailability() {
   // Initialize the availability object
   const availability = {};
   let roleOrder = runtimeSettings.roles;
+  const roleColumnMap = getConfiguredMemberRoleColumnMap(databaseSheet);
 
   // Standardize roleOrder to uppercase for case-insensitive matching
   roleOrder = roleOrder.map(role => role.toUpperCase());
@@ -2730,7 +3013,7 @@ function updateAvailability() {
       console.error('Failed to persist canonical in updateAvailability for row ' + (i + 1) + ': ' + err.message);
     }
     
-    const roles = getMemberRolesFromRow(row, runtimeSettings.roles);
+    const roles = getMemberRolesFromRow(row, runtimeSettings.roles, roleColumnMap);
     const timesWilling = row[2] ? row[2].toString().trim() : "";
     const rawUnavailableDates = row[3] ? row[3].toString() : "";
     
@@ -2827,6 +3110,7 @@ function initializeProject() {
     dbSheet.getRange(1, 6).setValue(CONFIG.sheetHeaders.canonicalName);
   }
   dbSheet.getRange(1, 1, 1, 6).setFontWeight("bold");
+  applySheetTheme(dbSheet);
 
   // 2. Create Form Metadata sheet if it doesn't exist
   let metaSheet = ss.getSheetByName(CONFIG.sheetNames.formMetadata);
@@ -2835,6 +3119,7 @@ function initializeProject() {
     metaSheet.appendRow(["Form Name", "Form ID"]);
     console.log("Created Form Metadata sheet.");
   }
+  applySheetTheme(metaSheet);
 
   // 3. Create Settings sheet if it doesn't exist
   let settingsSheet = ss.getSheetByName(CONFIG.sheetNames.settings);
@@ -2860,14 +3145,30 @@ function initializeProject() {
     configureAdminsSheetUi(adminsSheet);
   }
 
+  // 5. Create Roles sheet if it doesn't exist
+  let rolesSheet = ss.getSheetByName(CONFIG.sheetNames.rolesConfig);
+  if (!rolesSheet) {
+    rolesSheet = ss.insertSheet(CONFIG.sheetNames.rolesConfig);
+    rolesSheet.getRange(1, 1, 1, 3).setValues([getRolesSeedRows(loadRuntimeSettings().roles)[0]]);
+    console.log("Created Roles sheet.");
+  }
+  rolesSheet.getRange(1, 1, 1, 3).setFontWeight('bold');
+  seedSheetRowsIfEmpty(rolesSheet, getRolesSeedRows(loadRuntimeSettings().roles));
+  configureRolesSheetUi(rolesSheet);
+
+  rewriteSettingsSheetRows(settingsSheet, getSettingsSeedRows());
+  configureSettingsSheetUi(settingsSheet);
+
   const roleMigrationResult = maybeMigrateMemberRolesDuringSetup();
   if (roleMigrationResult && roleMigrationResult.status === 'migrated') {
     console.log('Initialized role checkbox workflow in Ministry Members.');
   } else if (roleMigrationResult && roleMigrationResult.status === 'already_configured') {
     console.log('Role checkbox workflow already configured in Ministry Members.');
+  } else if (roleMigrationResult && roleMigrationResult.status === 'updated_roles') {
+    console.log('Role checkbox workflow refreshed from the Roles sheet.');
   }
 
-  // 5. Migrate legacy sheet names to the friendlier go-forward names when possible.
+  // 6. Migrate legacy sheet names to the friendlier go-forward names when possible.
   let recurringSheet = ss.getSheetByName(CONFIG.sheetNames.recurring);
   let eventsSheet = ss.getSheetByName(CONFIG.sheetNames.events);
   let legacyRecurringSheet = ss.getSheetByName(CONFIG.sheetNames.recurringEvents);
@@ -2894,7 +3195,7 @@ function initializeProject() {
     console.log("Renamed Monthly Events sheet to Events.");
   }
 
-  // 6. Create the new Recurring sheet if no recurring configuration exists.
+  // 7. Create the new Recurring sheet if no recurring configuration exists.
   if (!recurringSheet && !legacyRecurringSheet) {
     recurringSheet = ss.insertSheet(CONFIG.sheetNames.recurring);
     recurringSheet.getRange(1, 1, 1, 10).setValues([getRecurringSeedRows()[0]]);
@@ -2906,7 +3207,7 @@ function initializeProject() {
     configureRecurringSheetUi(recurringSheet);
   }
 
-  // 7. Create the new Events sheet for month-specific additions/removals.
+  // 8. Create the new Events sheet for month-specific additions/removals.
   if (!eventsSheet) {
     eventsSheet = ss.insertSheet(CONFIG.sheetNames.events);
     eventsSheet.getRange(1, 1, 1, 8).setValues([getEventsSeedRows()[0]]);

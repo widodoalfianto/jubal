@@ -410,16 +410,19 @@ function runUnitTests() {
   } catch (e) { recordResult('getServiceDates:standardizedDisplay', false, e.message); }
 
   try {
-    if (!shouldArchiveEventsNow(new Date(2026, 0, 15), { eventsArchiveFrequency: 'Yearly', eventsArchiveMonth: 'January' })) {
-      throw new Error('Yearly January archive should run in January');
+    if (!shouldArchiveEventsNow(new Date(2026, 0, 1), { eventsArchiveFrequency: 'Yearly' })) {
+      throw new Error('Yearly archive should run on January 1');
     }
-    if (shouldArchiveEventsNow(new Date(2026, 1, 15), { eventsArchiveFrequency: 'Yearly', eventsArchiveMonth: 'January' })) {
-      throw new Error('Yearly January archive should not run in February');
+    if (shouldArchiveEventsNow(new Date(2026, 0, 2), { eventsArchiveFrequency: 'Yearly' })) {
+      throw new Error('Yearly archive should not run after January 1');
     }
-    if (!shouldArchiveEventsNow(new Date(2026, 3, 15), { eventsArchiveFrequency: 'Quarterly', eventsArchiveMonth: 'January' })) {
-      throw new Error('Quarterly archive should run in April');
+    if (!shouldArchiveEventsNow(new Date(2026, 3, 1), { eventsArchiveFrequency: 'Quarterly' })) {
+      throw new Error('Quarterly archive should run on the first day of a new quarter');
     }
-    if (shouldArchiveEventsNow(new Date(2026, 4, 15), { eventsArchiveFrequency: 'Off', eventsArchiveMonth: 'January' })) {
+    if (shouldArchiveEventsNow(new Date(2026, 3, 2), { eventsArchiveFrequency: 'Quarterly' })) {
+      throw new Error('Quarterly archive should not run after the first day of the quarter');
+    }
+    if (shouldArchiveEventsNow(new Date(2026, 4, 15), { eventsArchiveFrequency: 'Off' })) {
       throw new Error('Archive should not run when frequency is Off');
     }
     recordResult('eventsArchive:schedule', true, 'Archive cadence settings behave as expected');
@@ -473,7 +476,7 @@ function runUnitTests() {
       [true, new Date(2027, 0, 15), 'Vision Night', 'ADD', '', true, true, 'Current month event'],
       [true, new Date(2027, 1, 10), 'Prayer Night', 'ADD', '', true, true, 'Future event']
     ]));
-    const archiveResult = archivePastEventsIfDue(new Date(2027, 0, 15), { eventsArchiveFrequency: 'Yearly', eventsArchiveMonth: 'January' });
+    const archiveResult = archivePastEventsIfDue(new Date(2027, 0, 1), { eventsArchiveFrequency: 'Yearly' });
     if (archiveResult.archivedRows !== 1) throw new Error('Expected exactly one past real event to be archived');
 
     const eventsRows = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG.sheetNames.events).getDataRange().getDisplayValues();
@@ -537,8 +540,10 @@ function runIntegrationTests() {
     const runtimeSettings = loadRuntimeSettings();
     const settingsSheet = ss.getSheetByName(CONFIG.sheetNames.settings);
     const adminsSheet = ss.getSheetByName(CONFIG.sheetNames.admins);
+    const rolesSheet = ss.getSheetByName(CONFIG.sheetNames.rolesConfig);
     if (!settingsSheet) throw new Error('Settings sheet missing');
     if (!adminsSheet) throw new Error('Admins sheet missing');
+    if (!rolesSheet) throw new Error('Roles sheet missing');
     const settingsValues = settingsSheet.getRange(2, 1, settingsSheet.getLastRow() - 1, 1).getDisplayValues().flat();
     if (!ss.getSheetByName(CONFIG.sheetNames.recurring) && !ss.getSheetByName(CONFIG.sheetNames.recurringEvents)) {
       throw new Error('Recurring sheet missing');
@@ -555,14 +560,20 @@ function runIntegrationTests() {
     if (!dbSheet.getRange(2, 2).getFormula()) {
       throw new Error('Roles formula was not created in Ministry Members');
     }
-    if (settingsValues.indexOf('events_archive_frequency') === -1 || settingsValues.indexOf('events_archive_month') === -1) {
+    if (settingsValues.indexOf('events_archive_frequency') === -1) {
       throw new Error('Archive settings were not created in Settings');
     }
     if (settingsValues.indexOf('admin_reminder_enabled') === -1 || settingsValues.indexOf('admin_reminder_day') === -1) {
       throw new Error('Admin reminder settings were not created in Settings');
     }
+    if (settingsValues.indexOf('admin_emails') !== -1 || settingsValues.indexOf('roles') !== -1 || settingsValues.indexOf('events_archive_month') !== -1) {
+      throw new Error('Deprecated Settings rows should have been removed');
+    }
     if (!sheetUsesFriendlyAdminsLayout(adminsSheet)) {
       throw new Error('Admins sheet does not use the friendly admin layout');
+    }
+    if (!sheetUsesFriendlyRolesLayout(rolesSheet)) {
+      throw new Error('Roles sheet does not use the friendly role layout');
     }
     recordResult('initializeProject:configSheets', true, 'Configuration sheets created');
   } catch (e) { recordResult('initializeProject:configSheets', false, e.message); }
@@ -590,6 +601,7 @@ function runIntegrationTests() {
   // test: monthlySetup creates availability sheet and form metadata (smoke)
   try {
     replaceSheetContents(CONFIG.sheetNames.settings, getDefaultSettingsSheetRows());
+    replaceSheetContents(CONFIG.sheetNames.rolesConfig, getDefaultRolesSheetRows());
     replaceSheetContents(CONFIG.sheetNames.recurring, getDefaultRecurringSheetRows());
     replaceSheetContents(CONFIG.sheetNames.events, getDefaultEventsSheetRows());
     deleteSheetIfExists(CONFIG.sheetNames.monthlyEvents);
@@ -650,17 +662,14 @@ function getDefaultSettingsSheetRows() {
   return [
     ['Key', 'Value', 'Notes'],
     ['church_name', CONFIG.defaults.churchName, 'Used in form titles and notifications'],
-    ['time_zone', safeGetScriptTimeZone(), 'IANA timezone for event generation'],
-    ['forms_folder_id', CONFIG.ids.formsFolder, 'Drive folder where forms are moved after creation'],
-    ['admin_emails', CONFIG.ids.adminEmails.join(','), 'Legacy fallback only. Prefer the Admins sheet for a friendlier admin list.'],
-    ['roles', CONFIG.roles.join(','), 'Comma-separated ministry roles'],
+    ['time_zone', safeGetScriptTimeZone(), 'Time zone used for event generation and reminder emails'],
     ['form_creation_day', CONFIG.defaults.formCreationDay, 'Day of month when the daily monthlySetup trigger should create the next month form and availability sheet.'],
     ['admin_reminder_enabled', CONFIG.defaults.adminReminderEnabled, 'TRUE or FALSE. When TRUE, send planning reminders to admins.'],
     ['admin_reminder_day', CONFIG.defaults.adminReminderDay, 'Day of month to send the admin planning reminder for next month.'],
-    ['times_choices', CONFIG.defaults.timesChoices.join(','), 'Comma-separated willingness choices'],
+    ['times_choices', CONFIG.defaults.timesChoices.join(','), 'Choices shown in the form question for how many times someone is willing to serve this month.'],
     ['availability_sheet_suffix', CONFIG.defaults.availabilitySheetSuffix, 'Suffix used for monthly availability tabs'],
-    ['events_archive_frequency', CONFIG.defaults.eventsArchiveFrequency, 'Off, Monthly, Quarterly, or Yearly'],
-    ['events_archive_month', CONFIG.defaults.eventsArchiveMonth, 'Month that yearly archiving should run, such as January']
+    ['events_archive_frequency', CONFIG.defaults.eventsArchiveFrequency, 'Off, Monthly, Quarterly, or Yearly. Cleanup runs automatically on the first day of the new period.'],
+    ['forms_folder_id', CONFIG.ids.formsFolder, 'Only change this if you want new monthly forms to be stored in a different Drive folder.']
   ];
 }
 
@@ -670,6 +679,16 @@ function getDefaultAdminsSheetRows() {
     [true, 'Primary Admin', 'admin1@example.com', 'Main admin'],
     [true, 'Backup Admin', 'admin2@example.com', 'Also receives alerts'],
     [false, 'Example Admin', 'ignore@example.com', 'Disabled example row']
+  ];
+}
+
+function getDefaultRolesSheetRows() {
+  return [
+    ['Enabled', 'Role', 'Notes'],
+    [true, 'WL', 'Worship leader'],
+    [true, 'SINGER', 'Vocals'],
+    [true, 'DRUMS', 'Drum kit'],
+    [false, 'MEDIA', 'Disabled example role']
   ];
 }
 

@@ -13,6 +13,7 @@ const CONFIG = {
     reconciliation: "Reconciliation",
     settings: "Settings",
     admins: "Admins",
+    rolesConfig: "Roles",
     recurring: "Recurring",
     events: "Events",
     eventsArchive: "Events Archive",
@@ -42,8 +43,18 @@ const CONFIG = {
     availabilitySheetSuffix: "Availability",
     adminReminderEnabled: true,
     adminReminderDay: 5,
-    eventsArchiveFrequency: "Yearly",
-    eventsArchiveMonth: "January"
+    eventsArchiveFrequency: "Yearly"
+  },
+  themes: {
+    ministryMembers: { header: '#cfe2f3', tab: '#3c78d8', text: '#000000' },
+    formMetadata: { header: '#cfe2f3', tab: '#6d9eeb', text: '#000000' },
+    settings: { header: '#d9ead3', tab: '#6aa84f', text: '#000000' },
+    admins: { header: '#fff2cc', tab: '#f1c232', text: '#000000' },
+    rolesConfig: { header: '#fce5cd', tab: '#e69138', text: '#000000' },
+    recurring: { header: '#d9d2e9', tab: '#674ea7', text: '#000000' },
+    events: { header: '#d9d9d9', tab: '#666666', text: '#000000' },
+    eventsArchive: { header: '#eeeeee', tab: '#999999', text: '#000000' },
+    reconciliation: { header: '#f4cccc', tab: '#cc0000', text: '#000000' }
   },
   layout: {
     headerRowIndex: 13,
