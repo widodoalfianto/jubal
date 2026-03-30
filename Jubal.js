@@ -447,6 +447,30 @@ function monthMatchesFilter(filter, month) {
   return parts.some(part => parseMonthNumber(part) === month + 1);
 }
 
+function normalizeRecurrence(value, fallback) {
+  if (value === null || value === undefined || value === '') return fallback || 'monthly';
+  const normalized = String(value).trim().toLowerCase();
+  if (normalized === 'monthly' || normalized === 'yearly') return normalized;
+  return fallback || 'monthly';
+}
+
+function inferRuleRecurrence(ruleType, monthFilter) {
+  if (ruleType === 'easter_offset') return 'yearly';
+  const normalizedMonthFilter = String(monthFilter || '').trim().toLowerCase();
+  if (normalizedMonthFilter && normalizedMonthFilter !== 'all') return 'yearly';
+  return 'monthly';
+}
+
+function getConfiguredEventRulesSheet() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const eventsSheet = ss.getSheetByName(CONFIG.sheetNames.events);
+  const legacySheet = ss.getSheetByName(CONFIG.sheetNames.recurringEvents);
+
+  if (eventsSheet && eventsSheet.getLastRow() > 1) return eventsSheet;
+  if (legacySheet && legacySheet.getLastRow() > 1) return legacySheet;
+  return eventsSheet || legacySheet || null;
+}
+
 function getNthWeekdayOfMonth(year, month, weekday, ordinal) {
   if (weekday === null || weekday === undefined || ordinal === null || ordinal === undefined || ordinal === 'every') {
     return null;
@@ -560,6 +584,7 @@ function getDefaultRecurringRules() {
       enabled: true,
       ruleId: 'sunday_service',
       label: '',
+      recurrence: 'monthly',
       ruleType: 'every_weekday',
       weekday: 0,
       ordinal: 'every',
@@ -570,58 +595,12 @@ function getDefaultRecurringRules() {
       includeInSchedule: true,
       sortOrder: 20,
       type: 'service'
-    },
-    {
-      enabled: true,
-      ruleId: 'corporate_prayer',
-      label: 'Corporate Prayer',
-      ruleType: 'nth_weekday',
-      weekday: 5,
-      ordinal: 1,
-      monthFilter: 'all',
-      dayOfMonth: null,
-      offsetDays: 0,
-      includeInForm: true,
-      includeInSchedule: true,
-      sortOrder: 10,
-      type: 'prayer'
-    },
-    {
-      enabled: true,
-      ruleId: 'easter',
-      label: 'Easter',
-      ruleType: 'easter_offset',
-      weekday: null,
-      ordinal: null,
-      monthFilter: 'all',
-      dayOfMonth: null,
-      offsetDays: 0,
-      includeInForm: true,
-      includeInSchedule: true,
-      sortOrder: 30,
-      type: 'special'
-    },
-    {
-      enabled: true,
-      ruleId: 'christmas',
-      label: 'Christmas',
-      ruleType: 'fixed_date',
-      weekday: null,
-      ordinal: null,
-      monthFilter: '12',
-      dayOfMonth: 25,
-      offsetDays: 0,
-      includeInForm: true,
-      includeInSchedule: true,
-      sortOrder: 40,
-      type: 'special'
     }
   ];
 }
 
 function hasConfiguredRecurringRules() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName(CONFIG.sheetNames.recurringEvents);
+  const sheet = getConfiguredEventRulesSheet();
   return !!(sheet && sheet.getLastRow() > 1);
 }
 
@@ -629,14 +608,21 @@ function normalizeRecurringRule(row, headerMap, fallbackRuleId) {
   const ruleType = String(getValueByHeader(row, headerMap, ['Rule Type'], '') || '').trim().toLowerCase();
   if (!ruleType) return null;
 
+  const monthFilter = String(getValueByHeader(row, headerMap, ['Month', 'Month Filter'], 'all') || 'all').trim() || 'all';
+  const recurrence = normalizeRecurrence(
+    getValueByHeader(row, headerMap, ['Recurrence'], ''),
+    inferRuleRecurrence(ruleType, monthFilter)
+  );
+
   return {
     enabled: parseBooleanLike(getValueByHeader(row, headerMap, ['Enabled'], true), true),
     ruleId: String(getValueByHeader(row, headerMap, ['Rule ID'], fallbackRuleId) || fallbackRuleId).trim() || fallbackRuleId,
     label: String(getValueByHeader(row, headerMap, ['Label'], '') || '').trim(),
+    recurrence: recurrence,
     ruleType: ruleType,
     weekday: normalizeWeekday(getValueByHeader(row, headerMap, ['Weekday'], '')),
     ordinal: normalizeOrdinal(getValueByHeader(row, headerMap, ['Ordinal'], '')),
-    monthFilter: String(getValueByHeader(row, headerMap, ['Month Filter'], 'all') || 'all').trim() || 'all',
+    monthFilter: monthFilter,
     dayOfMonth: toIntegerOrDefault(getValueByHeader(row, headerMap, ['Day Of Month'], ''), null),
     offsetDays: toIntegerOrDefault(getValueByHeader(row, headerMap, ['Offset Days'], 0), 0),
     includeInForm: parseBooleanLike(getValueByHeader(row, headerMap, ['Include In Form'], true), true),
@@ -647,8 +633,7 @@ function normalizeRecurringRule(row, headerMap, fallbackRuleId) {
 }
 
 function loadRecurringRules() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName(CONFIG.sheetNames.recurringEvents);
+  const sheet = getConfiguredEventRulesSheet();
   if (!sheet || sheet.getLastRow() < 2) return getDefaultRecurringRules();
 
   const rows = sheet.getDataRange().getValues();
@@ -851,39 +836,13 @@ function getAvailabilitySheetHeaderChoices(year, month, settings) {
 
   if (!headers.length) return [];
 
-  const extras = getAutomaticSpecialEvents(year, month, runtimeSettings.timeZone).map(formatEventChoice);
-  extras.forEach(choice => {
-    const choiceKey = extractDateKey(choice);
-    const alreadyPresent = headers.some(header => extractDateKey(header) === choiceKey);
-    if (!alreadyPresent) headers.push(choice);
-  });
-
   return mergeDateChoices(headers);
 }
 
 function getBuiltInFallbackServiceDates(year, month, timeZone) {
-  const serviceDates = [];
-  const firstDay = new Date(year, month, 1);
-  const firstFriday = new Date(firstDay);
-  while (firstFriday.getDay() !== 5) {
-    firstFriday.setDate(firstFriday.getDate() + 1);
-  }
-
-  serviceDates.push(Utilities.formatDate(firstFriday, timeZone, 'MM/dd') + ' - Corporate Prayer');
-
-  const currentDate = new Date(firstDay);
-  while (currentDate.getMonth() === month) {
-    if (currentDate.getDay() === 0) {
-      serviceDates.push(Utilities.formatDate(currentDate, timeZone, 'MM/dd'));
-    }
-    currentDate.setDate(currentDate.getDate() + 1);
-  }
-
-  getAutomaticSpecialEvents(year, month, timeZone).forEach(event => {
-    serviceDates.push(formatEventChoice(event));
-  });
-
-  return mergeDateChoices(Array.from(new Set(serviceDates)));
+  return mergeDateChoices(
+    getAllWeekdaysInMonth(year, month, 0).map(date => Utilities.formatDate(date, timeZone, 'MM/dd'))
+  );
 }
 
 /**
@@ -1219,7 +1178,7 @@ function createNewFormForMonth(month, year, monthName) {
 
   // Sync form's date choices with the availability sheet (in case headers were edited)
   try {
-    const availSheetName = `${monthName} Availability`;
+    const availSheetName = getAvailabilitySheetName(year, month, runtimeSettings);
     syncFormWithSheet(form.getId(), availSheetName);
   } catch (err) {
     console.error('Failed to sync form with sheet after creation: ' + err.message);
@@ -1833,19 +1792,20 @@ function initializeProject() {
     console.log("Created Settings sheet.");
   }
 
-  // 4. Create Recurring Events sheet if it doesn't exist
-  let recurringSheet = ss.getSheetByName(CONFIG.sheetNames.recurringEvents);
-  if (!recurringSheet) {
-    recurringSheet = ss.insertSheet(CONFIG.sheetNames.recurringEvents);
-    recurringSheet.appendRow(['Enabled', 'Rule ID', 'Label', 'Rule Type', 'Weekday', 'Ordinal', 'Month Filter', 'Day Of Month', 'Offset Days', 'Include In Form', 'Include In Schedule', 'Sort Order', 'Type']);
-    recurringSheet.getRange(1, 1, 1, 13).setFontWeight('bold');
-    recurringSheet.getRange(2, 1, 4, 13).setValues([
-      [true, 'sunday_service', '', 'every_weekday', 'Sunday', 'every', 'all', '', 0, true, true, 20, 'service'],
-      [true, 'corporate_prayer', 'Corporate Prayer', 'nth_weekday', 'Friday', 1, 'all', '', 0, true, true, 10, 'prayer'],
-      [true, 'easter', 'Easter', 'easter_offset', '', '', 'all', '', 0, true, true, 30, 'special'],
-      [true, 'christmas', 'Christmas', 'fixed_date', '', '', '12', 25, 0, true, true, 40, 'special']
+  // 4. Create the preferred Events sheet if neither the new nor legacy recurring sheet exists.
+  let eventsSheet = ss.getSheetByName(CONFIG.sheetNames.events);
+  const legacyRecurringSheet = ss.getSheetByName(CONFIG.sheetNames.recurringEvents);
+  if (!eventsSheet && !legacyRecurringSheet) {
+    eventsSheet = ss.insertSheet(CONFIG.sheetNames.events);
+    eventsSheet.appendRow(['Enabled', 'Rule ID', 'Label', 'Recurrence', 'Rule Type', 'Month', 'Weekday', 'Ordinal', 'Day Of Month', 'Offset Days', 'Include In Form', 'Include In Schedule', 'Sort Order', 'Type', 'Notes']);
+    eventsSheet.getRange(1, 1, 1, 15).setFontWeight('bold');
+    eventsSheet.getRange(2, 1, 4, 15).setValues([
+      [true, 'sunday_service', '', 'monthly', 'every_weekday', 'all', 'Sunday', 'every', '', 0, true, true, 20, 'service', 'Default weekly Sunday schedule'],
+      [false, 'corporate_prayer', 'Corporate Prayer', 'monthly', 'nth_weekday', 'all', 'Friday', 1, '', 0, true, true, 10, 'prayer', 'Enable if your church has a monthly prayer gathering'],
+      [false, 'easter', 'Easter', 'yearly', 'easter_offset', 'all', '', '', '', 0, true, true, 30, 'special', 'Enable to include Easter automatically each year'],
+      [false, 'christmas', 'Christmas', 'yearly', 'fixed_date', '12', '', '', 25, 0, true, true, 40, 'special', 'Enable to include Christmas automatically each year']
     ]);
-    console.log("Created Recurring Events sheet.");
+    console.log("Created Events sheet.");
   }
 
   // 5. Create action-based Monthly Events sheet if it doesn't exist
