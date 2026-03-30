@@ -24,7 +24,7 @@ function runFullSystemTest() {
   // --- Step 2: Monthly Setup ---
   console.log("\n--- Step 2: Monthly Setup ---");
   // Run the monthly setup to create the form and availability sheet
-  monthlySetup();
+  runMonthlySetupNow();
   
   // Calculate expected sheet name for next month
   const today = new Date();
@@ -454,6 +454,19 @@ function runUnitTests() {
   } catch (e) { recordResult('adminReminder:content', false, e.message); }
 
   try {
+    if (!shouldRunMonthlySetupToday(new Date(2026, 2, 8), { formCreationDay: 8 })) {
+      throw new Error('Monthly setup should run on the configured setup day');
+    }
+    if (shouldRunMonthlySetupToday(new Date(2026, 2, 7), { formCreationDay: 8 })) {
+      throw new Error('Monthly setup should not run before the configured setup day');
+    }
+    if (getMonthlySetupPropertyKey(new Date(2026, 2, 8)) !== 'monthlySetupCompleted:2026-04') {
+      throw new Error('Monthly setup property key should target the next month');
+    }
+    recordResult('monthlySetup:guardLogic', true, 'Daily trigger guard uses form_creation_day and next-month keys');
+  } catch (e) { recordResult('monthlySetup:guardLogic', false, e.message); }
+
+  try {
     deleteSheetIfExists(CONFIG.sheetNames.eventsArchive);
     replaceSheetContents(CONFIG.sheetNames.events, getDefaultEventsSheetRows().concat([
       [true, new Date(2026, 11, 24), 'Christmas Eve', 'ADD', '', true, true, 'Past real event'],
@@ -580,8 +593,8 @@ function runIntegrationTests() {
     replaceSheetContents(CONFIG.sheetNames.recurring, getDefaultRecurringSheetRows());
     replaceSheetContents(CONFIG.sheetNames.events, getDefaultEventsSheetRows());
     deleteSheetIfExists(CONFIG.sheetNames.monthlyEvents);
-    monthlySetup();
-    recordResult('monthlySetup:smoke', true, 'monthlySetup executed');
+    runMonthlySetupNow();
+    recordResult('monthlySetup:smoke', true, 'runMonthlySetupNow executed');
   } catch (e) { recordResult('monthlySetup:smoke', false, e.message); }
 }
 
@@ -641,7 +654,7 @@ function getDefaultSettingsSheetRows() {
     ['forms_folder_id', CONFIG.ids.formsFolder, 'Drive folder where forms are moved after creation'],
     ['admin_emails', CONFIG.ids.adminEmails.join(','), 'Legacy fallback only. Prefer the Admins sheet for a friendlier admin list.'],
     ['roles', CONFIG.roles.join(','), 'Comma-separated ministry roles'],
-    ['form_creation_day', CONFIG.defaults.formCreationDay, 'Monthly setup day shown to admins in reminder emails. Keep your Apps Script trigger aligned with this day.'],
+    ['form_creation_day', CONFIG.defaults.formCreationDay, 'Day of month when the daily monthlySetup trigger should create the next month form and availability sheet.'],
     ['admin_reminder_enabled', CONFIG.defaults.adminReminderEnabled, 'TRUE or FALSE. When TRUE, send planning reminders to admins.'],
     ['admin_reminder_day', CONFIG.defaults.adminReminderDay, 'Day of month to send the admin planning reminder for next month.'],
     ['times_choices', CONFIG.defaults.timesChoices.join(','), 'Comma-separated willingness choices'],

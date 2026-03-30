@@ -54,12 +54,15 @@ Update the `CONFIG` object with your specific details:
 ### 4. Triggers
 Set up the automation triggers in the Apps Script dashboard (Clock icon on the left):
 1. **Monthly Form Creation**:
-   - Function: `monthlySetup` | Event Source: `Time-driven` | Type: `Month timer` (e.g., 8th of the month).
+   - Function: `monthlySetup` | Event Source: `Time-driven` | Type: `Day timer`
+   - This can run daily. The script only performs the monthly setup when today's date matches `form_creation_day`.
 2. **Database Update**:
    - Function: `onFormSubmit` | Event Source: `From spreadsheet` | Event Type: `On form submit`.
 3. **Admin Reminder Check**:
    - Function: `sendAdminPlanningReminderIfDue` | Event Source: `Time-driven` | Type: `Day timer`
    - This can run daily. The script only sends a reminder when the date matches your `admin_reminder_day` setting.
+4. **Manual Override**:
+   - If you need to run the monthly setup immediately from the editor, use `runMonthlySetupNow()`.
 
 ---
 
@@ -173,7 +176,7 @@ Useful settings:
 - `admin_emails`: legacy fallback if the `Admins` sheet is not being used yet
 - `admin_reminder_enabled`: `TRUE` or `FALSE`
 - `admin_reminder_day`: day of month to remind admins to review next month before the form is created
-- `form_creation_day`: the monthly setup day shown in reminder emails; keep your Apps Script trigger aligned with it
+- `form_creation_day`: the day of month when the daily `monthlySetup` trigger should actually create the next month form and availability sheet
 - `events_archive_frequency`: `Off`, `Monthly`, `Quarterly`, or `Yearly`
 - `events_archive_month`: month to run yearly archiving, such as `January`
 

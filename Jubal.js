@@ -1596,6 +1596,19 @@ function getAdminReminderPropertyKey(referenceDate) {
   return `adminReminderSent:${planDate.getFullYear()}-${('0' + (planDate.getMonth() + 1)).slice(-2)}`;
 }
 
+function getMonthlySetupPropertyKey(referenceDate) {
+  const date = referenceDate ? new Date(referenceDate) : new Date();
+  const planDate = new Date(date);
+  planDate.setMonth(planDate.getMonth() + 1);
+  return `monthlySetupCompleted:${planDate.getFullYear()}-${('0' + (planDate.getMonth() + 1)).slice(-2)}`;
+}
+
+function shouldRunMonthlySetupToday(referenceDate, settings) {
+  const runtimeSettings = settings || loadRuntimeSettings();
+  const today = referenceDate ? new Date(referenceDate) : new Date();
+  return today.getDate() === runtimeSettings.formCreationDay;
+}
+
 function buildAdminPlanningReminder(referenceDate, settings) {
   const runtimeSettings = settings || loadRuntimeSettings();
   const today = referenceDate ? new Date(referenceDate) : new Date();
@@ -1985,7 +1998,7 @@ function getSettingsSeedRows() {
     ['forms_folder_id', CONFIG.ids.formsFolder, 'Drive folder where forms are moved after creation'],
     ['admin_emails', CONFIG.ids.adminEmails.join(','), 'Legacy fallback only. Prefer the Admins sheet for a friendlier admin list.'],
     ['roles', CONFIG.roles.join(','), 'Comma-separated ministry roles'],
-    ['form_creation_day', CONFIG.defaults.formCreationDay, 'Monthly setup day shown to admins in reminder emails. Keep your Apps Script trigger aligned with this day.'],
+    ['form_creation_day', CONFIG.defaults.formCreationDay, 'Day of month when the daily monthlySetup trigger should create the next month form and availability sheet.'],
     ['admin_reminder_enabled', CONFIG.defaults.adminReminderEnabled, 'TRUE or FALSE. When TRUE, send planning reminders to admins.'],
     ['admin_reminder_day', CONFIG.defaults.adminReminderDay, 'Day of month to send the admin planning reminder for next month.'],
     ['times_choices', CONFIG.defaults.timesChoices.join(','), 'Comma-separated willingness choices'],
@@ -2506,13 +2519,31 @@ function clearByHeader(header) {
   console.log(header + ' column cleared.');
 }
 
-function monthlySetup() {
+function runMonthlySetupInternal(options) {
+  const opts = options || {};
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const metadataSheet = ss.getSheetByName("Form Metadata") || ss.insertSheet("Form Metadata");
   const runtimeSettings = loadRuntimeSettings();
   const trackedFormIds = getTrackedFormIds(metadataSheet);
+  const today = opts.referenceDate ? new Date(opts.referenceDate) : new Date();
+  const propertyKey = getMonthlySetupPropertyKey(today);
+  const props = PropertiesService.getScriptProperties();
 
-  const today = new Date();
+  if (!opts.force && !shouldRunMonthlySetupToday(today, runtimeSettings)) {
+    return {
+      status: 'not_due_today',
+      day: today.getDate(),
+      formCreationDay: runtimeSettings.formCreationDay
+    };
+  }
+
+  if (!opts.force && props.getProperty(propertyKey)) {
+    return {
+      status: 'already_ran',
+      key: propertyKey
+    };
+  }
+
   try {
     const archiveResult = archivePastEventsIfDue(today, runtimeSettings);
     if (archiveResult.status === 'archived') {
@@ -2584,6 +2615,23 @@ function monthlySetup() {
   } catch (err) {
     console.error('Failed to ensure legacy Events entries: ' + err.message);
   }
+
+  props.setProperty(propertyKey, new Date().toISOString());
+  return {
+    status: 'completed',
+    key: propertyKey,
+    planMonthName: planMonthName,
+    planYear: planYear,
+    planMonth: planMonth + 1
+  };
+}
+
+function monthlySetup() {
+  return runMonthlySetupInternal();
+}
+
+function runMonthlySetupNow() {
+  return runMonthlySetupInternal({ force: true });
 }
 
 function findFormResponseSheet() {
