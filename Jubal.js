@@ -948,6 +948,18 @@ function normalizeName(name) {
   }
 }
 
+function formatAvailabilityDisplayName(name) {
+  const normalized = String(name || '').trim().replace(/\s+/g, ' ');
+  if (!normalized) return '';
+
+  const nameParts = normalized.split(' ');
+  if (nameParts.length > 1) {
+    return nameParts[0] + ' ' + nameParts[1].charAt(0).toUpperCase() + '.';
+  }
+
+  return normalized;
+}
+
 function updateDatabase(e) {
   try {
     const databaseSS = SpreadsheetApp.getActiveSpreadsheet();
@@ -1696,11 +1708,7 @@ function updateAvailability() {
 
     if (!name || !roles.length) continue;
 
-    // Format the name as "Firstname L."
-    const nameParts = name.split(" ");
-    if (nameParts.length > 1) {
-      name = nameParts[0] + " " + nameParts[1].charAt(0).toUpperCase() + ".";
-    }
+    name = formatAvailabilityDisplayName(name);
 
     // If "Times Willing to Serve" is blank, mark unavailable for all dates
     const isUnavailableAllMonth = timesWilling === "";

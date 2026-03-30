@@ -126,10 +126,12 @@ function runFullSystemTest() {
   // Check the specific cell
   const cellValue = updatedAvailData[roleRowIndex][targetColIndex];
   
-  if (String(cellValue).includes(testName)) {
-    console.log(`✅ SUCCESS: Found '${testName}' in the '${testRole}' row for ${targetDate}.`);
+  const expectedDisplayName = formatAvailabilityDisplayName(testName);
+
+  if (String(cellValue).includes(expectedDisplayName)) {
+    console.log(`✅ SUCCESS: Found '${expectedDisplayName}' in the '${testRole}' row for ${targetDate}.`);
   } else {
-    throw new Error(`❌ FAILURE: Expected '${testName}' in cell [${roleRowIndex+1}, ${targetColIndex+1}] but found: '${cellValue}'`);
+    throw new Error(`❌ FAILURE: Expected '${expectedDisplayName}' in cell [${roleRowIndex+1}, ${targetColIndex+1}] but found: '${cellValue}'`);
   }
   
   console.log("\n🎉 FULL SYSTEM TEST PASSED");
