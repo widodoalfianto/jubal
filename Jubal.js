@@ -450,7 +450,7 @@ function monthMatchesFilter(filter, month) {
 function normalizeRecurrence(value, fallback) {
   if (value === null || value === undefined || value === '') return fallback || 'monthly';
   const normalized = String(value).trim().toLowerCase();
-  if (normalized === 'monthly' || normalized === 'yearly') return normalized;
+  if (normalized === 'weekly' || normalized === 'monthly' || normalized === 'yearly') return normalized;
   return fallback || 'monthly';
 }
 
@@ -461,14 +461,88 @@ function inferRuleRecurrence(ruleType, monthFilter) {
   return 'monthly';
 }
 
-function getConfiguredEventRulesSheet() {
+function normalizeFrequency(value) {
+  if (value === null || value === undefined || value === '') return '';
+  const normalized = String(value).trim().toLowerCase();
+  if (['weekly', 'monthly', 'yearly', 'easter'].includes(normalized)) return normalized;
+  return '';
+}
+
+function slugifyRuleId(value, fallback) {
+  const normalized = String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+
+  return normalized || fallback;
+}
+
+function getSheetHeaderMap(sheet) {
+  if (!sheet || sheet.getLastColumn() < 1) return {};
+  const headerRow = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  return buildHeaderMap(headerRow);
+}
+
+function sheetLooksLikeRecurring(sheet) {
+  if (!sheet) return false;
+  const headerMap = getSheetHeaderMap(sheet);
+  if (Object.prototype.hasOwnProperty.call(headerMap, 'frequency')) return true;
+  if (Object.prototype.hasOwnProperty.call(headerMap, 'rule type')) return true;
+  if (Object.prototype.hasOwnProperty.call(headerMap, 'week of month')) return true;
+  if (Object.prototype.hasOwnProperty.call(headerMap, 'weekday') &&
+      !Object.prototype.hasOwnProperty.call(headerMap, 'action')) return true;
+  return false;
+}
+
+function sheetLooksLikeEventOverrides(sheet) {
+  if (!sheet) return false;
+  const headerMap = getSheetHeaderMap(sheet);
+  if (!Object.prototype.hasOwnProperty.call(headerMap, 'date')) return false;
+  return (
+    Object.prototype.hasOwnProperty.call(headerMap, 'action') ||
+    Object.prototype.hasOwnProperty.call(headerMap, 'event') ||
+    Object.prototype.hasOwnProperty.call(headerMap, 'label') ||
+    Object.prototype.hasOwnProperty.call(headerMap, 'year') ||
+    Object.prototype.hasOwnProperty.call(headerMap, 'month')
+  );
+}
+
+function sheetUsesFriendlyRecurringLayout(sheet) {
+  const headerMap = getSheetHeaderMap(sheet);
+  return Object.prototype.hasOwnProperty.call(headerMap, 'event') &&
+    Object.prototype.hasOwnProperty.call(headerMap, 'frequency') &&
+    Object.prototype.hasOwnProperty.call(headerMap, 'week of month');
+}
+
+function sheetUsesFriendlyEventsLayout(sheet) {
+  const headerMap = getSheetHeaderMap(sheet);
+  return Object.prototype.hasOwnProperty.call(headerMap, 'event') &&
+    Object.prototype.hasOwnProperty.call(headerMap, 'action') &&
+    Object.prototype.hasOwnProperty.call(headerMap, 'recurring event');
+}
+
+function getConfiguredRecurringSheet() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const eventsSheet = ss.getSheetByName(CONFIG.sheetNames.events);
+  const recurringSheet = ss.getSheetByName(CONFIG.sheetNames.recurring);
+  const oldEventsSheet = ss.getSheetByName(CONFIG.sheetNames.events);
   const legacySheet = ss.getSheetByName(CONFIG.sheetNames.recurringEvents);
 
-  if (eventsSheet && eventsSheet.getLastRow() > 1) return eventsSheet;
+  if (recurringSheet && recurringSheet.getLastRow() > 1) return recurringSheet;
+  if (oldEventsSheet && oldEventsSheet.getLastRow() > 1 && sheetLooksLikeRecurring(oldEventsSheet)) return oldEventsSheet;
   if (legacySheet && legacySheet.getLastRow() > 1) return legacySheet;
-  return eventsSheet || legacySheet || null;
+  return recurringSheet || (sheetLooksLikeRecurring(oldEventsSheet) ? oldEventsSheet : null) || legacySheet || null;
+}
+
+function getConfiguredEventsSheet() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const preferredSheet = ss.getSheetByName(CONFIG.sheetNames.events);
+  const legacySheet = ss.getSheetByName(CONFIG.sheetNames.monthlyEvents);
+
+  if (preferredSheet && preferredSheet.getLastRow() > 1 && sheetLooksLikeEventOverrides(preferredSheet)) return preferredSheet;
+  if (legacySheet && legacySheet.getLastRow() > 1) return legacySheet;
+  if (preferredSheet && preferredSheet.getLastRow() <= 1) return preferredSheet;
+  return legacySheet || null;
 }
 
 function getNthWeekdayOfMonth(year, month, weekday, ordinal) {
@@ -600,40 +674,84 @@ function getDefaultRecurringRules() {
 }
 
 function hasConfiguredRecurringRules() {
-  const sheet = getConfiguredEventRulesSheet();
+  const sheet = getConfiguredRecurringSheet();
   return !!(sheet && sheet.getLastRow() > 1);
 }
 
 function normalizeRecurringRule(row, headerMap, fallbackRuleId) {
-  const ruleType = String(getValueByHeader(row, headerMap, ['Rule Type'], '') || '').trim().toLowerCase();
+  let ruleType = String(getValueByHeader(row, headerMap, ['Rule Type'], '') || '').trim().toLowerCase();
+  let recurrence;
+  let monthFilter = String(getValueByHeader(row, headerMap, ['Month', 'Month Filter'], 'all') || 'all').trim() || 'all';
+  let weekday = normalizeWeekday(getValueByHeader(row, headerMap, ['Weekday'], ''));
+  let ordinal = normalizeOrdinal(getValueByHeader(row, headerMap, ['Week Of Month', 'Ordinal'], ''));
+  let dayOfMonth = toIntegerOrDefault(getValueByHeader(row, headerMap, ['Day', 'Day Of Month'], ''), null);
+  let offsetDays = toIntegerOrDefault(getValueByHeader(row, headerMap, ['Offset Days'], 0), 0);
+
+  if (!ruleType) {
+    const frequency = normalizeFrequency(getValueByHeader(row, headerMap, ['Frequency', 'Recurrence'], ''));
+    if (!frequency) return null;
+
+    if (frequency === 'weekly') {
+      ruleType = 'every_weekday';
+      recurrence = 'weekly';
+      ordinal = 'every';
+      monthFilter = 'all';
+    } else if (frequency === 'monthly') {
+      recurrence = 'monthly';
+      if (dayOfMonth) {
+        ruleType = 'fixed_date';
+      } else if (weekday !== null && ordinal && ordinal !== 'every') {
+        ruleType = 'nth_weekday';
+      } else if (weekday !== null) {
+        ruleType = 'every_weekday';
+        ordinal = 'every';
+      }
+    } else if (frequency === 'yearly') {
+      recurrence = 'yearly';
+      if (dayOfMonth) {
+        ruleType = 'fixed_date';
+      } else if (weekday !== null && ordinal) {
+        ruleType = 'nth_weekday';
+      }
+    } else if (frequency === 'easter') {
+      ruleType = 'easter_offset';
+      recurrence = 'yearly';
+      monthFilter = 'all';
+    }
+  }
+
   if (!ruleType) return null;
 
-  const monthFilter = String(getValueByHeader(row, headerMap, ['Month', 'Month Filter'], 'all') || 'all').trim() || 'all';
-  const recurrence = normalizeRecurrence(
-    getValueByHeader(row, headerMap, ['Recurrence'], ''),
+  recurrence = normalizeRecurrence(
+    recurrence || getValueByHeader(row, headerMap, ['Recurrence'], ''),
     inferRuleRecurrence(ruleType, monthFilter)
   );
 
+  const label = String(getValueByHeader(row, headerMap, ['Event', 'Label'], '') || '').trim();
+  const providedRuleId = String(getValueByHeader(row, headerMap, ['Rule ID'], fallbackRuleId) || fallbackRuleId).trim();
+  const inferredType = String(getValueByHeader(row, headerMap, ['Type'], '') || '').trim();
+  const defaultSortOrder = label ? 10 : 20;
+
   return {
     enabled: parseBooleanLike(getValueByHeader(row, headerMap, ['Enabled'], true), true),
-    ruleId: String(getValueByHeader(row, headerMap, ['Rule ID'], fallbackRuleId) || fallbackRuleId).trim() || fallbackRuleId,
-    label: String(getValueByHeader(row, headerMap, ['Label'], '') || '').trim(),
+    ruleId: slugifyRuleId(providedRuleId || label, fallbackRuleId),
+    label: label,
     recurrence: recurrence,
     ruleType: ruleType,
-    weekday: normalizeWeekday(getValueByHeader(row, headerMap, ['Weekday'], '')),
-    ordinal: normalizeOrdinal(getValueByHeader(row, headerMap, ['Ordinal'], '')),
+    weekday: weekday,
+    ordinal: ordinal,
     monthFilter: monthFilter,
-    dayOfMonth: toIntegerOrDefault(getValueByHeader(row, headerMap, ['Day Of Month'], ''), null),
-    offsetDays: toIntegerOrDefault(getValueByHeader(row, headerMap, ['Offset Days'], 0), 0),
+    dayOfMonth: dayOfMonth,
+    offsetDays: offsetDays,
     includeInForm: parseBooleanLike(getValueByHeader(row, headerMap, ['Include In Form'], true), true),
     includeInSchedule: parseBooleanLike(getValueByHeader(row, headerMap, ['Include In Schedule'], true), true),
-    sortOrder: toIntegerOrDefault(getValueByHeader(row, headerMap, ['Sort Order'], 100), 100),
-    type: String(getValueByHeader(row, headerMap, ['Type'], '') || '').trim()
+    sortOrder: toIntegerOrDefault(getValueByHeader(row, headerMap, ['Sort Order'], defaultSortOrder), defaultSortOrder),
+    type: inferredType || (label ? 'special' : 'service')
   };
 }
 
 function loadRecurringRules() {
-  const sheet = getConfiguredEventRulesSheet();
+  const sheet = getConfiguredRecurringSheet();
   if (!sheet || sheet.getLastRow() < 2) return getDefaultRecurringRules();
 
   const rows = sheet.getDataRange().getValues();
@@ -698,13 +816,16 @@ function normalizeMonthlyOverride(row, headerMap, fallbackRuleId, timeZone) {
   const action = String(getValueByHeader(row, headerMap, ['Action'], 'ADD') || 'ADD').trim().toUpperCase();
   if (action !== 'ADD' && action !== 'REMOVE') return null;
 
+  const label = String(getValueByHeader(row, headerMap, ['Event', 'Label'], '') || '').trim();
+  const recurringEvent = String(getValueByHeader(row, headerMap, ['Recurring Event', 'Rule ID'], '') || '').trim();
+
   return {
     enabled: parseBooleanLike(getValueByHeader(row, headerMap, ['Enabled'], true), true),
     action: action,
     dateObject: parsedDate,
     isoDate: toIsoDate(parsedDate, timeZone),
-    label: String(getValueByHeader(row, headerMap, ['Label'], '') || '').trim(),
-    ruleId: String(getValueByHeader(row, headerMap, ['Rule ID'], '') || '').trim(),
+    label: label,
+    ruleId: recurringEvent ? slugifyRuleId(recurringEvent, fallbackRuleId) : '',
     includeInForm: parseBooleanLike(getValueByHeader(row, headerMap, ['Include In Form'], true), true),
     includeInSchedule: parseBooleanLike(getValueByHeader(row, headerMap, ['Include In Schedule'], true), true),
     sortOrder: toIntegerOrDefault(getValueByHeader(row, headerMap, ['Sort Order'], 100), 100),
@@ -713,8 +834,7 @@ function normalizeMonthlyOverride(row, headerMap, fallbackRuleId, timeZone) {
 }
 
 function loadMonthlyOverrides(year, month, timeZone) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName(CONFIG.sheetNames.monthlyEvents);
+  const sheet = getConfiguredEventsSheet();
   if (!sheet || sheet.getLastRow() < 2) return [];
 
   const rows = sheet.getDataRange().getValues();
@@ -775,8 +895,7 @@ function applyMonthlyOverrides(events, overrides, timeZone) {
 }
 
 function getLegacyMonthlyEventChoices(year, month, timeZone) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName(CONFIG.sheetNames.monthlyEvents);
+  const sheet = getConfiguredEventsSheet();
   if (!sheet || sheet.getLastRow() < 2) return [];
 
   const rows = sheet.getDataRange().getValues();
@@ -1307,31 +1426,24 @@ function syncCurrentFormWithAvailability() {
 }
 
 /**
- * Ensure Monthly Events sheet contains automatic special events (Easter/Christmas)
- * for the provided year and 0-based month. Adds rows with Type='auto' if missing.
+ * Legacy helper: ensure an old-style Events/Monthly Events sheet contains
+ * automatic special events (Easter/Christmas) for the provided year/month.
  */
 function ensureMonthlyEventsFor(year, month) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  if (hasConfiguredRecurringRules()) {
-    logDebug('info', 'Skipping ensureMonthlyEventsFor because recurring rules are configured');
-    return;
-  }
   // Defensive defaults: if year not provided or invalid, use current year
   year = parseInt(year, 10);
   if (isNaN(year)) year = new Date().getFullYear();
   // Normalize month to 0-based integer
   month = parseInt(month, 10);
   if (isNaN(month)) month = new Date().getMonth();
-  let me = ss.getSheetByName(CONFIG.sheetNames.monthlyEvents);
-  if (!me) {
-    me = ss.insertSheet(CONFIG.sheetNames.monthlyEvents);
-    me.appendRow(['Year', 'Month', 'Date', 'Label', 'Type']);
-  }
+  let me = getConfiguredEventsSheet();
+  if (!me) return;
 
   const data = me.getDataRange().getValues();
   const header = data[0] || [];
   if (header.indexOf('Action') >= 0) {
-    logDebug('info', 'Skipping ensureMonthlyEventsFor because Monthly Events uses action-based overrides');
+    logDebug('info', 'Skipping ensureMonthlyEventsFor because Events uses action-based overrides');
     return;
   }
   const yCol = header.indexOf('Year');
@@ -1430,6 +1542,45 @@ function deleteFormResponseSheets(ss) {
       console.log("Skipped deleting Form Responses tab '" + toDelete + "': " + e.message);
     }
   });
+}
+
+function applyCheckboxColumn(sheet, column, numRows) {
+  if (!sheet || numRows <= 0) return;
+  sheet.getRange(2, column, numRows, 1).insertCheckboxes();
+}
+
+function applyDropdownColumn(sheet, column, values, numRows) {
+  if (!sheet || numRows <= 0) return;
+  const rule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(values, true)
+    .setAllowInvalid(true)
+    .build();
+  sheet.getRange(2, column, numRows, 1).setDataValidation(rule);
+}
+
+function configureRecurringSheetUi(sheet) {
+  if (!sheet) return;
+  const maxRows = Math.max(sheet.getMaxRows() - 1, 1);
+  sheet.setFrozenRows(1);
+  applyCheckboxColumn(sheet, 1, maxRows);
+  applyDropdownColumn(sheet, 3, ['Weekly', 'Monthly', 'Yearly', 'Easter'], maxRows);
+  applyDropdownColumn(sheet, 4, ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'], maxRows);
+  applyDropdownColumn(sheet, 5, ['every', '1', '2', '3', '4', '5', 'last'], maxRows);
+  applyDropdownColumn(sheet, 6, ['all', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', 'January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'], maxRows);
+  applyCheckboxColumn(sheet, 8, maxRows);
+  applyCheckboxColumn(sheet, 9, maxRows);
+  sheet.autoResizeColumns(1, Math.min(10, sheet.getLastColumn()));
+}
+
+function configureEventsSheetUi(sheet) {
+  if (!sheet) return;
+  const maxRows = Math.max(sheet.getMaxRows() - 1, 1);
+  sheet.setFrozenRows(1);
+  applyCheckboxColumn(sheet, 1, maxRows);
+  applyDropdownColumn(sheet, 4, ['ADD', 'REMOVE'], maxRows);
+  applyCheckboxColumn(sheet, 6, maxRows);
+  applyCheckboxColumn(sheet, 7, maxRows);
+  sheet.autoResizeColumns(1, Math.min(8, sheet.getLastColumn()));
 }
 
 function setupAvailability(sheetName, year, month) {
@@ -1592,11 +1743,11 @@ function monthlySetup() {
   createNewFormForMonth(planMonth, planYear, planMonthName);
   console.log(`Created new form for ${planMonthName}`);
 
-  // Ensure Monthly Events contains required automatic events (Easter/Christmas)
+  // Legacy support: populate automatic events only for old-style Events/Monthly Events sheets.
   try {
     ensureMonthlyEventsFor(planYear, planMonth);
   } catch (err) {
-    console.error('Failed to ensure Monthly Events entries: ' + err.message);
+    console.error('Failed to ensure legacy Events entries: ' + err.message);
   }
 }
 
@@ -1818,29 +1969,59 @@ function initializeProject() {
     console.log("Created Settings sheet.");
   }
 
-  // 4. Create the preferred Events sheet if neither the new nor legacy recurring sheet exists.
+  // 4. Migrate legacy sheet names to the friendlier go-forward names when possible.
+  let recurringSheet = ss.getSheetByName(CONFIG.sheetNames.recurring);
   let eventsSheet = ss.getSheetByName(CONFIG.sheetNames.events);
-  const legacyRecurringSheet = ss.getSheetByName(CONFIG.sheetNames.recurringEvents);
-  if (!eventsSheet && !legacyRecurringSheet) {
-    eventsSheet = ss.insertSheet(CONFIG.sheetNames.events);
-    eventsSheet.appendRow(['Enabled', 'Rule ID', 'Label', 'Recurrence', 'Rule Type', 'Month', 'Weekday', 'Ordinal', 'Day Of Month', 'Offset Days', 'Include In Form', 'Include In Schedule', 'Sort Order', 'Type', 'Notes']);
-    eventsSheet.getRange(1, 1, 1, 15).setFontWeight('bold');
-    eventsSheet.getRange(2, 1, 4, 15).setValues([
-      [true, 'sunday_service', '', 'monthly', 'every_weekday', 'all', 'Sunday', 'every', '', 0, true, true, 20, 'service', 'Default weekly Sunday schedule'],
-      [false, 'corporate_prayer', 'Corporate Prayer', 'monthly', 'nth_weekday', 'all', 'Friday', 1, '', 0, true, true, 10, 'prayer', 'Enable if your church has a monthly prayer gathering'],
-      [false, 'easter', 'Easter', 'yearly', 'easter_offset', 'all', '', '', '', 0, true, true, 30, 'special', 'Enable to include Easter automatically each year'],
-      [false, 'christmas', 'Christmas', 'yearly', 'fixed_date', '12', '', '', 25, 0, true, true, 40, 'special', 'Enable to include Christmas automatically each year']
-    ]);
-    console.log("Created Events sheet.");
+  let legacyRecurringSheet = ss.getSheetByName(CONFIG.sheetNames.recurringEvents);
+  let legacyMonthlyEventsSheet = ss.getSheetByName(CONFIG.sheetNames.monthlyEvents);
+
+  if (!recurringSheet && eventsSheet && sheetLooksLikeRecurring(eventsSheet)) {
+    eventsSheet.setName(CONFIG.sheetNames.recurring);
+    recurringSheet = eventsSheet;
+    eventsSheet = ss.getSheetByName(CONFIG.sheetNames.events);
+    console.log("Renamed legacy Events sheet to Recurring.");
   }
 
-  // 5. Create action-based Monthly Events sheet if it doesn't exist
-  let monthlyEventsSheet = ss.getSheetByName(CONFIG.sheetNames.monthlyEvents);
-  if (!monthlyEventsSheet) {
-    monthlyEventsSheet = ss.insertSheet(CONFIG.sheetNames.monthlyEvents);
-    monthlyEventsSheet.appendRow(['Enabled', 'Year', 'Month', 'Date', 'Action', 'Label', 'Rule ID', 'Include In Form', 'Include In Schedule', 'Sort Order', 'Type', 'Notes']);
-    monthlyEventsSheet.getRange(1, 1, 1, 12).setFontWeight('bold');
-    console.log("Created Monthly Events sheet.");
+  if (!recurringSheet && legacyRecurringSheet) {
+    legacyRecurringSheet.setName(CONFIG.sheetNames.recurring);
+    recurringSheet = legacyRecurringSheet;
+    legacyRecurringSheet = ss.getSheetByName(CONFIG.sheetNames.recurringEvents);
+    console.log("Renamed Recurring Events sheet to Recurring.");
+  }
+
+  if (!eventsSheet && legacyMonthlyEventsSheet) {
+    legacyMonthlyEventsSheet.setName(CONFIG.sheetNames.events);
+    eventsSheet = legacyMonthlyEventsSheet;
+    legacyMonthlyEventsSheet = ss.getSheetByName(CONFIG.sheetNames.monthlyEvents);
+    console.log("Renamed Monthly Events sheet to Events.");
+  }
+
+  // 5. Create the new Recurring sheet if no recurring configuration exists.
+  if (!recurringSheet && !legacyRecurringSheet) {
+    recurringSheet = ss.insertSheet(CONFIG.sheetNames.recurring);
+    recurringSheet.appendRow(['Enabled', 'Event', 'Frequency', 'Weekday', 'Week Of Month', 'Month', 'Day', 'Include In Form', 'Include In Schedule', 'Notes']);
+    recurringSheet.getRange(1, 1, 1, 10).setFontWeight('bold');
+    recurringSheet.getRange(2, 1, 4, 10).setValues([
+      [true, '', 'Weekly', 'Sunday', 'every', 'all', '', true, true, 'Default weekly Sunday schedule. Leave Event blank to show plain dates.'],
+      [false, 'Corporate Prayer', 'Monthly', 'Friday', 1, 'all', '', true, true, 'Enable if your church has a monthly prayer gathering'],
+      [false, 'Easter', 'Easter', '', '', 'all', '', true, true, 'Enable to include Easter automatically each year'],
+      [false, 'Christmas', 'Yearly', '', '', '12', 25, true, true, 'Enable to include Christmas automatically each year']
+    ]);
+    configureRecurringSheetUi(recurringSheet);
+    console.log("Created Recurring sheet.");
+  } else if (recurringSheet && sheetUsesFriendlyRecurringLayout(recurringSheet)) {
+    configureRecurringSheetUi(recurringSheet);
+  }
+
+  // 6. Create the new Events sheet for month-specific additions/removals.
+  if (!eventsSheet) {
+    eventsSheet = ss.insertSheet(CONFIG.sheetNames.events);
+    eventsSheet.appendRow(['Enabled', 'Date', 'Event', 'Action', 'Recurring Event', 'Include In Form', 'Include In Schedule', 'Notes']);
+    eventsSheet.getRange(1, 1, 1, 8).setFontWeight('bold');
+    configureEventsSheetUi(eventsSheet);
+    console.log("Created Events sheet.");
+  } else if (sheetUsesFriendlyEventsLayout(eventsSheet)) {
+    configureEventsSheetUi(eventsSheet);
   }
   
   console.log("Initialization complete. You can now run monthlySetup().");
