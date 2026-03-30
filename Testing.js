@@ -52,10 +52,10 @@ function runFullSystemTest() {
   let targetColIndex = -1;
   
   for (let i = 1; i < headerRowValues.length; i++) {
-    // Simple check: assumes headers are dates like "MM/dd" or "MM/dd - Label"
     const val = headerRowValues[i];
-    if (val.match(/\d{2}\/\d{2}/)) {
-      targetDate = val.split(' - ')[0].trim();
+    const extracted = extractDateKey(val);
+    if (extracted) {
+      targetDate = extracted;
       targetColIndex = i;
       break;
     }
@@ -234,11 +234,48 @@ function runUnitTests() {
   } catch (e) { recordResult('parseUnavailableDates: range', false, e.message); }
 
   try {
+    const r4b = parseUnavailableDates('04/03 - Good Friday, 4/5/2026 - Easter');
+    assertEqual(r4b.parsed[0], '04/03', 'labeled date parsed');
+    assertEqual(r4b.parsed[1], '04/05', 'labeled ISO-like date parsed');
+    recordResult('parseUnavailableDates: labeled choices', true, 'Parsed: ' + JSON.stringify(r4b));
+  } catch (e) { recordResult('parseUnavailableDates: labeled choices', false, e.message); }
+
+  try {
     const r5 = parseUnavailableDates('foobar');
     // Expect a fallback and at least one parse error
     if (!r5.errors || r5.errors.length === 0) throw new Error('Expected parseErrors for invalid input');
     recordResult('parseUnavailableDates: invalid input', true, 'Parsed: ' + JSON.stringify(r5));
   } catch (e) { recordResult('parseUnavailableDates: invalid input', false, e.message); }
+
+  try {
+    assertEqual(extractDateKey('04/03 - Good Friday'), '04/03', 'extractDateKey for labeled MM/DD');
+    assertEqual(extractDateKey('4/5/2026 - Easter'), '04/05', 'extractDateKey for labeled M/D/YYYY');
+    assertEqual(extractDateKey('04/12'), '04/12', 'extractDateKey for plain MM/DD');
+    assertEqual(extractDateKey('Service on April 26, 2026'), '04/26', 'extractDateKey from embedded month name');
+    recordResult('extractDateKey: header normalization', true, 'Mixed header formats normalize correctly');
+  } catch (e) { recordResult('extractDateKey: header normalization', false, e.message); }
+
+  try {
+    assertEqual(normalizeDateChoice('4/5/2026 - Easter'), '04/05 - Easter', 'normalizeDateChoice with label');
+    assertEqual(normalizeDateChoice('04/12'), '04/12', 'normalizeDateChoice without label');
+    assertEqual(extractDateLabel('04/03 - Good Friday'), 'Good Friday', 'extractDateLabel');
+    recordResult('normalizeDateChoice: standard display', true, 'Dates display as MM/DD with optional labels');
+  } catch (e) { recordResult('normalizeDateChoice: standard display', false, e.message); }
+
+  try {
+    const sorted = sortDateChoices(['04/12', '4/5/2026 - Easter', '04/03 - Good Friday']);
+    assertEqual(sorted[0], '04/03 - Good Friday', 'sorted first date');
+    assertEqual(sorted[1], '04/05 - Easter', 'sorted second date');
+    assertEqual(sorted[2], '04/12', 'sorted third date');
+    recordResult('sortDateChoices: chronological order', true, 'Date choices sort chronologically');
+  } catch (e) { recordResult('sortDateChoices: chronological order', false, e.message); }
+
+  try {
+    const merged = mergeDateChoices(['04/05', '4/5/2026 - Easter', '04/03 - Good Friday']);
+    assertEqual(merged[0], '04/03 - Good Friday', 'merged first date');
+    assertEqual(merged[1], '04/05 - Easter', 'special event label should replace plain same-day display');
+    recordResult('mergeDateChoices: labeled same-day merge', true, 'Same-day choices merge to labeled display');
+  } catch (e) { recordResult('mergeDateChoices: labeled same-day merge', false, e.message); }
 
   // normalizeName tests
   try {
@@ -295,6 +332,17 @@ function runUnitTests() {
     if (!sd.some(date => date.indexOf('05/15 - LegacyEvent') !== -1)) throw new Error('Legacy Monthly Events did not remain authoritative');
     recordResult('getServiceDates:legacyMonthlyEvents', true, 'Legacy Monthly Events compatibility preserved');
   } catch (e) { recordResult('getServiceDates:legacyMonthlyEvents', false, e.message); }
+
+  try {
+    replaceSheetContents(CONFIG.sheetNames.recurringEvents, getDefaultRecurringSheetRows());
+    replaceSheetContents(CONFIG.sheetNames.monthlyEvents, getDefaultMonthlyEventsSheetRows());
+    const sd = getServiceDates(2026, 3); // April 2026
+    if (!sd.includes('04/03 - Corporate Prayer')) throw new Error('Corporate Prayer should be labeled');
+    if (!sd.includes('04/05 - Easter')) throw new Error('Easter should be labeled');
+    if (sd.includes('4/5/2026 - Easter')) throw new Error('Displayed dates must be standardized to MM/DD');
+    if (sd.includes('04/05')) throw new Error('Plain same-day Easter date should not also appear');
+    recordResult('getServiceDates:standardizedDisplay', true, 'Special events retain labels with standardized dates');
+  } catch (e) { recordResult('getServiceDates:standardizedDisplay', false, e.message); }
 
   replaceSheetContents(CONFIG.sheetNames.monthlyEvents, getDefaultMonthlyEventsSheetRows());
   logDebug('info', 'Unit tests completed');
