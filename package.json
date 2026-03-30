@@ -1,0 +1,16 @@
+{
+  "name": "jubal-apps-script",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "lint": "echo \"No lint configured. Add ESLint if desired.\"",
+    "clasp:push": "clasp push",
+    "clasp:deploy": "clasp deploy -v \"Automated deploy\"",
+    "run:tests": "node scripts/run_tests.js",
+    "validate:tenants": "node scripts/tenant_matrix.js --validate"
+  },
+  "dependencies": {
+    "googleapis": "^121.0.0"
+  },
+  "devDependencies": {}
+}

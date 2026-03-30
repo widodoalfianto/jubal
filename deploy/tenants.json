@@ -1,0 +1,32 @@
+{
+  "tenants": [
+    {
+      "name": "dev-full",
+      "stage": "dev",
+      "description": "Full-feature sandbox tenant with recurring events and overrides enabled.",
+      "scriptIdVar": "SCRIPT_ID_DEV_FULL",
+      "runRemoteTests": true
+    },
+    {
+      "name": "dev-minimal",
+      "stage": "dev",
+      "description": "Minimal sandbox tenant for Sunday-only or reduced-rule churches.",
+      "scriptIdVar": "SCRIPT_ID_DEV_MINIMAL",
+      "runRemoteTests": true
+    },
+    {
+      "name": "OC",
+      "stage": "prod",
+      "description": "Primary production tenant for IFGF OC.",
+      "scriptIdVar": "SCRIPT_ID_OC",
+      "runRemoteTests": false
+    },
+    {
+      "name": "MRV",
+      "stage": "prod",
+      "description": "Production tenant for IFGF MRV.",
+      "scriptIdVar": "SCRIPT_ID_MRV",
+      "runRemoteTests": false
+    }
+  ]
+}

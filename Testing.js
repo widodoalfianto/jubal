@@ -31,7 +31,7 @@ function runFullSystemTest() {
   const planDate = new Date(today);
   planDate.setMonth(today.getMonth() + 1);
   const planMonthName = planDate.toLocaleString('default', { month: 'long' });
-  const availabilitySheetName = `${planMonthName} Availability`;
+  const availabilitySheetName = getAvailabilitySheetName(planDate.getFullYear(), planDate.getMonth());
   
   const availSheet = ss.getSheetByName(availabilitySheetName);
   if (!availSheet) throw new Error(`Availability sheet '${availabilitySheetName}' not created`);
@@ -65,7 +65,7 @@ function runFullSystemTest() {
   console.log(`Targeting date: ${targetDate} at column index ${targetColIndex}`);
 
   const testName = "Test User " + new Date().getTime();
-  const testRole = CONFIG.roles[0]; // e.g., "WL"
+  const testRole = loadRuntimeSettings().roles[0]; // e.g., "WL"
   
   // Mock Event Object mimicking a Google Form submission
   const e = {
@@ -197,4 +197,243 @@ function cleanupTestArtifacts(ss, testName, createdSheetName, monthName) {
       console.log(`✅ Deleted empty test sheet '${sheet.getName()}'.`);
     }
   }
+}
+
+/** Unit test harness and tests for parsing/normalization utilities */
+function runUnitTests() {
+  initializeProject();
+  resetTestResultsSheet();
+  replaceSheetContents(CONFIG.sheetNames.settings, getDefaultSettingsSheetRows());
+  replaceSheetContents(CONFIG.sheetNames.recurringEvents, getDefaultRecurringSheetRows());
+  replaceSheetContents(CONFIG.sheetNames.monthlyEvents, getDefaultMonthlyEventsSheetRows());
+
+  // parseUnavailableDates tests
+  try {
+    const r1 = parseUnavailableDates('3/29');
+    assertEqual(r1.parsed[0], '03/29', 'parse 3/29 -> 03/29');
+    recordResult('parseUnavailableDates: simple MM/DD', true, 'Parsed: ' + JSON.stringify(r1));
+  } catch (e) { recordResult('parseUnavailableDates: simple MM/DD', false, e.message); }
+
+  try {
+    const r2 = parseUnavailableDates('March 5');
+    assertEqual(r2.parsed[0], formatDateMMDD(new Date(new Date().getFullYear(), 2, 5)), 'parse March 5');
+    recordResult('parseUnavailableDates: "March 5"', true, 'Parsed: ' + JSON.stringify(r2));
+  } catch (e) { recordResult('parseUnavailableDates: "March 5"', false, e.message); }
+
+  try {
+    const r3 = parseUnavailableDates('2026-03-29');
+    assertEqual(r3.parsed[0], '03/29', 'parse ISO date');
+    recordResult('parseUnavailableDates: ISO', true, 'Parsed: ' + JSON.stringify(r3));
+  } catch (e) { recordResult('parseUnavailableDates: ISO', false, e.message); }
+
+  try {
+    const r4 = parseUnavailableDates('3/29 - 4/5');
+    assertEqual(r4.parsed[0], '03/29', 'range start parsed');
+    assertEqual(r4.parsed[1], '04/05', 'range end parsed');
+    recordResult('parseUnavailableDates: range', true, 'Parsed: ' + JSON.stringify(r4));
+  } catch (e) { recordResult('parseUnavailableDates: range', false, e.message); }
+
+  try {
+    const r5 = parseUnavailableDates('foobar');
+    // Expect a fallback and at least one parse error
+    if (!r5.errors || r5.errors.length === 0) throw new Error('Expected parseErrors for invalid input');
+    recordResult('parseUnavailableDates: invalid input', true, 'Parsed: ' + JSON.stringify(r5));
+  } catch (e) { recordResult('parseUnavailableDates: invalid input', false, e.message); }
+
+  // normalizeName tests
+  try {
+    const n1 = normalizeName(' John   Doe ');
+    assertEqual(n1, 'john doe', 'normalize spaces and lowercase');
+    recordResult('normalizeName: spacing', true, 'Result: ' + n1);
+  } catch (e) { recordResult('normalizeName: spacing', false, e.message); }
+
+  try {
+    const n2 = normalizeName('José Álvarez');
+    assertEqual(n2, 'jose alvarez', 'remove diacritics');
+    recordResult('normalizeName: diacritics', true, 'Result: ' + n2);
+  } catch (e) { recordResult('normalizeName: diacritics', false, e.message); }
+
+  // getServiceDates tests
+  try {
+    const sd = getServiceDates(2026, 2); // March 2026
+    if (!Array.isArray(sd) || sd.length === 0) throw new Error('Expected non-empty array');
+    if (!sd.some(date => date.includes('Corporate Prayer'))) throw new Error('Expected default recurring Corporate Prayer event');
+    for (let i = 0; i < sd.length; i++) {
+      if (!sd[i].match(/^\d{2}\/\d{2}/)) throw new Error('Service date not in MM/dd format: ' + sd[i]);
+    }
+    recordResult('getServiceDates: March 2026', true, 'Service dates: ' + JSON.stringify(sd));
+  } catch (e) { recordResult('getServiceDates: March 2026', false, e.message); }
+
+  try {
+    const recurringRows = getDefaultRecurringSheetRows();
+    recurringRows[2][0] = false; // Disable corporate prayer
+    replaceSheetContents(CONFIG.sheetNames.recurringEvents, recurringRows);
+    const sd = getServiceDates(2026, 2);
+    if (sd.some(date => date.includes('Corporate Prayer'))) throw new Error('Corporate Prayer should be absent when recurring rule is disabled');
+    recordResult('getServiceDates:disableRecurringRule', true, 'Corporate Prayer disabled successfully');
+  } catch (e) { recordResult('getServiceDates:disableRecurringRule', false, e.message); }
+
+  try {
+    replaceSheetContents(CONFIG.sheetNames.recurringEvents, getDefaultRecurringSheetRows());
+    replaceSheetContents(CONFIG.sheetNames.monthlyEvents, [
+      ['Enabled', 'Year', 'Month', 'Date', 'Action', 'Label', 'Rule ID', 'Include In Form', 'Include In Schedule', 'Sort Order', 'Type', 'Notes'],
+      [true, 2026, 3, '2026-03-06', 'REMOVE', 'Corporate Prayer', 'corporate_prayer', true, true, 10, 'override', 'Moved off first Friday'],
+      [true, 2026, 3, '2026-03-13', 'ADD', 'Corporate Prayer', 'corporate_prayer', true, true, 10, 'override', 'Moved to second Friday']
+    ]);
+    const sd = getServiceDates(2026, 2);
+    if (sd.some(date => date.indexOf('03/06 - Corporate Prayer') !== -1)) throw new Error('Corporate Prayer was not removed from first Friday');
+    if (!sd.some(date => date.indexOf('03/13 - Corporate Prayer') !== -1)) throw new Error('Corporate Prayer was not added to second Friday');
+    recordResult('getServiceDates:actionOverrides', true, 'ADD/REMOVE override flow works');
+  } catch (e) { recordResult('getServiceDates:actionOverrides', false, e.message); }
+
+  try {
+    replaceSheetContents(CONFIG.sheetNames.monthlyEvents, [
+      ['Year', 'Month', 'Date', 'Label', 'Type'],
+      [2026, 5, '2026-05-15', 'LegacyEvent', 'legacy']
+    ]);
+    const sd = getServiceDates(2026, 4); // May 2026
+    if (!sd.some(date => date.indexOf('05/15 - LegacyEvent') !== -1)) throw new Error('Legacy Monthly Events did not remain authoritative');
+    recordResult('getServiceDates:legacyMonthlyEvents', true, 'Legacy Monthly Events compatibility preserved');
+  } catch (e) { recordResult('getServiceDates:legacyMonthlyEvents', false, e.message); }
+
+  replaceSheetContents(CONFIG.sheetNames.monthlyEvents, getDefaultMonthlyEventsSheetRows());
+  logDebug('info', 'Unit tests completed');
+}
+
+function assertEqual(actual, expected, label) {
+  if (actual !== expected) throw new Error(`${label} — expected '${expected}', got '${actual}'`);
+}
+
+function recordResult(testName, passed, message) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let tr = ss.getSheetByName('Test Results');
+  if (!tr) {
+    tr = ss.insertSheet('Test Results');
+    tr.appendRow(['timestamp', 'testName', 'status', 'message']);
+  }
+  tr.appendRow([new Date().toISOString(), testName, passed ? 'PASS' : 'FAIL', message || '']);
+}
+
+/** Run all unit and integration tests. WARNING: run on a spreadsheet copy. */
+function runAllTests() {
+  logDebug('info', 'Starting full test run');
+  runUnitTests();
+  try {
+    runIntegrationTests();
+  } catch (e) {
+    recordResult('runIntegrationTests', false, e.message);
+  }
+  logDebug('info', 'All tests finished');
+  return summarizeTestResults();
+}
+
+function runIntegrationTests() {
+  // WARNING: integration tests modify sheets and may create forms/files. Run on a copy.
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  // test: computeEaster correctness
+  try {
+    const eas = computeEaster(2026);
+    assertEqual(formatDateMMDD(eas), '04/05', 'computeEaster for 2026');
+    recordResult('computeEaster:2026', true, formatDateMMDD(eas));
+  } catch (e) { recordResult('computeEaster:2026', false, e.message); }
+
+  // test: initializeProject seeds the new configuration sheets
+  try {
+    initializeProject();
+    if (!ss.getSheetByName(CONFIG.sheetNames.settings)) throw new Error('Settings sheet missing');
+    if (!ss.getSheetByName(CONFIG.sheetNames.recurringEvents)) throw new Error('Recurring Events sheet missing');
+    if (!ss.getSheetByName(CONFIG.sheetNames.monthlyEvents)) throw new Error('Monthly Events sheet missing');
+    recordResult('initializeProject:configSheets', true, 'Configuration sheets created');
+  } catch (e) { recordResult('initializeProject:configSheets', false, e.message); }
+
+  // test: ensureMonthlyEventsFor remains usable for legacy installs
+  try {
+    replaceSheetContents(CONFIG.sheetNames.monthlyEvents, [['Year', 'Month', 'Date', 'Label', 'Type']]);
+    ensureMonthlyEventsFor(2026, 3); // April 2026
+    const me = ss.getSheetByName(CONFIG.sheetNames.monthlyEvents);
+    const rows = me.getDataRange().getValues();
+    const found = rows.some(r => String(r.join('|')).indexOf('Easter') !== -1 && String(r.join('|')).indexOf('2026') !== -1);
+    if (!found) throw new Error('Legacy Monthly Events did not receive Easter');
+    recordResult('ensureMonthlyEventsFor:legacyMode', true, 'Legacy Monthly Events auto-population still works');
+  } catch (e) { recordResult('ensureMonthlyEventsFor:legacyMode', false, e.message); }
+
+  // test: monthlySetup creates availability sheet and form metadata (smoke)
+  try {
+    replaceSheetContents(CONFIG.sheetNames.settings, getDefaultSettingsSheetRows());
+    replaceSheetContents(CONFIG.sheetNames.recurringEvents, getDefaultRecurringSheetRows());
+    replaceSheetContents(CONFIG.sheetNames.monthlyEvents, getDefaultMonthlyEventsSheetRows());
+    monthlySetup();
+    recordResult('monthlySetup:smoke', true, 'monthlySetup executed');
+  } catch (e) { recordResult('monthlySetup:smoke', false, e.message); }
+}
+
+function resetTestResultsSheet() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let tr = ss.getSheetByName('Test Results');
+  if (!tr) {
+    tr = ss.insertSheet('Test Results');
+  }
+  tr.clearContents();
+  tr.appendRow(['timestamp', 'testName', 'status', 'message']);
+}
+
+function summarizeTestResults() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const tr = ss.getSheetByName('Test Results');
+  if (!tr || tr.getLastRow() < 2) {
+    return { pass: 0, fail: 0, total: 0 };
+  }
+
+  const rows = tr.getRange(2, 1, tr.getLastRow() - 1, 4).getValues();
+  const summary = rows.reduce((acc, row) => {
+    const status = String(row[2] || '').toUpperCase();
+    if (status === 'PASS') acc.pass++;
+    if (status === 'FAIL') acc.fail++;
+    return acc;
+  }, { pass: 0, fail: 0, total: rows.length });
+
+  return summary;
+}
+
+function replaceSheetContents(sheetName, rows) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(sheetName);
+  if (!sheet) {
+    sheet = ss.insertSheet(sheetName);
+  } else {
+    sheet.clearContents();
+  }
+
+  if (!rows || !rows.length) return sheet;
+  sheet.getRange(1, 1, rows.length, rows[0].length).setValues(rows);
+  return sheet;
+}
+
+function getDefaultSettingsSheetRows() {
+  return [
+    ['Key', 'Value', 'Notes'],
+    ['church_name', CONFIG.defaults.churchName, 'Used in form titles and notifications'],
+    ['time_zone', safeGetScriptTimeZone(), 'IANA timezone for event generation'],
+    ['forms_folder_id', CONFIG.ids.formsFolder, 'Drive folder where forms are moved after creation'],
+    ['admin_emails', CONFIG.ids.adminEmails.join(','), 'Comma-separated admin recipients'],
+    ['roles', CONFIG.roles.join(','), 'Comma-separated ministry roles'],
+    ['form_creation_day', CONFIG.defaults.formCreationDay, 'Reserved for future time-driven setup'],
+    ['times_choices', CONFIG.defaults.timesChoices.join(','), 'Comma-separated willingness choices'],
+    ['availability_sheet_suffix', CONFIG.defaults.availabilitySheetSuffix, 'Suffix used for monthly availability tabs']
+  ];
+}
+
+function getDefaultRecurringSheetRows() {
+  return [
+    ['Enabled', 'Rule ID', 'Label', 'Rule Type', 'Weekday', 'Ordinal', 'Month Filter', 'Day Of Month', 'Offset Days', 'Include In Form', 'Include In Schedule', 'Sort Order', 'Type'],
+    [true, 'sunday_service', '', 'every_weekday', 'Sunday', 'every', 'all', '', 0, true, true, 20, 'service'],
+    [true, 'corporate_prayer', 'Corporate Prayer', 'nth_weekday', 'Friday', 1, 'all', '', 0, true, true, 10, 'prayer'],
+    [true, 'easter', 'Easter', 'easter_offset', '', '', 'all', '', 0, true, true, 30, 'special'],
+    [true, 'christmas', 'Christmas', 'fixed_date', '', '', '12', 25, 0, true, true, 40, 'special']
+  ];
+}
+
+function getDefaultMonthlyEventsSheetRows() {
+  return [['Enabled', 'Year', 'Month', 'Date', 'Action', 'Label', 'Rule ID', 'Include In Form', 'Include In Schedule', 'Sort Order', 'Type', 'Notes']];
 }

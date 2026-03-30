@@ -1,0 +1,255 @@
+name: CI & Deploy
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      deploy_stage:
+        description: Which tenant group to deploy
+        required: true
+        default: dev
+        type: choice
+        options:
+          - dev
+          - prod
+
+jobs:
+  build:
+    name: Validate Repo
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Validate tenant registry
+        run: npm run validate:tenants
+
+      - name: Validate project layout
+        run: |
+          test -f appsscript.json || { echo "appsscript.json is required."; exit 1; }
+          test -f .claspignore || { echo ".claspignore is required to avoid pushing helper files."; exit 1; }
+          test -f deploy/tenants.json || { echo "deploy/tenants.json is required."; exit 1; }
+
+      - name: Syntax check
+        run: |
+          node --check Config.js
+          node --check Jubal.js
+          node --check Testing.js
+          node --check scripts/run_tests.js
+          node --check scripts/tenant_matrix.js
+
+  prepare-matrix:
+    name: Prepare Tenant Matrices
+    needs: build
+    runs-on: ubuntu-latest
+    outputs:
+      dev_matrix: ${{ steps.matrix.outputs.dev_matrix }}
+      dev_test_matrix: ${{ steps.matrix.outputs.dev_test_matrix }}
+      prod_matrix: ${{ steps.matrix.outputs.prod_matrix }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - id: matrix
+        name: Generate matrices
+        run: |
+          {
+            echo 'dev_matrix<<EOF'
+            node scripts/tenant_matrix.js --stage dev --format matrix
+            echo 'EOF'
+            echo 'dev_test_matrix<<EOF'
+            node scripts/tenant_matrix.js --stage dev --tests-only --format matrix
+            echo 'EOF'
+            echo 'prod_matrix<<EOF'
+            node scripts/tenant_matrix.js --stage prod --format matrix
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+  deploy-dev:
+    name: Deploy Dev Tenant
+    needs: prepare-matrix
+    runs-on: ubuntu-latest
+    environment: dev
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.deploy_stage == 'dev')
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.prepare-matrix.outputs.dev_matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install clasp
+        run: npm install -g @google/clasp
+
+      - name: Resolve tenant script ID
+        env:
+          TENANT_NAME: ${{ matrix.name }}
+          DIRECT_SCRIPT_ID: ${{ matrix.scriptId || '' }}
+          SCRIPT_ID_NAME: ${{ matrix.scriptIdVar || '' }}
+          SCRIPT_ID_FROM_VAR: ${{ matrix.scriptIdVar && vars[matrix.scriptIdVar] || '' }}
+          SCRIPT_ID_FROM_SECRET: ${{ matrix.scriptIdVar && secrets[matrix.scriptIdVar] || '' }}
+        run: |
+          SCRIPT_ID="${DIRECT_SCRIPT_ID:-${SCRIPT_ID_FROM_VAR:-$SCRIPT_ID_FROM_SECRET}}"
+          if [ -z "${SCRIPT_ID}" ]; then
+            echo "No script ID resolved for tenant ${TENANT_NAME}.";
+            if [ -n "${SCRIPT_ID_NAME}" ]; then
+              echo "No GitHub variable or secret found for ${SCRIPT_ID_NAME}.";
+            fi
+            exit 1;
+          fi
+          SCRIPT_ID="${SCRIPT_ID}" bash scripts/create_clasp_json.sh
+
+      - name: Authenticate clasp using service account credentials
+        env:
+          GCP_CREDS: ${{ secrets.GCP_CREDENTIALS }}
+        run: |
+          if [ -z "${GCP_CREDS}" ]; then
+            echo "GCP_CREDENTIALS secret is not set.";
+            exit 1;
+          fi
+          echo "${GCP_CREDS}" > gcp-creds.json
+          clasp login --creds gcp-creds.json
+
+      - name: Push project to Apps Script
+        run: clasp push --force
+
+      - name: Create deployment version (best-effort)
+        env:
+          TENANT_NAME: ${{ matrix.name }}
+        run: clasp deploy -v "GitHub Actions deploy (${TENANT_NAME})" || echo "clasp deploy failed; files were still pushed."
+
+      - name: Cleanup credentials
+        run: |
+          shred -u gcp-creds.json || rm -f gcp-creds.json || true
+          rm -f .clasp.json || true
+
+  test-dev:
+    name: Run Dev Remote Tests
+    needs: [prepare-matrix, deploy-dev]
+    runs-on: ubuntu-latest
+    environment: dev
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.deploy_stage == 'dev')
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.prepare-matrix.outputs.dev_test_matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Resolve tenant script ID
+        id: resolve-script-id
+        env:
+          TENANT_NAME: ${{ matrix.name }}
+          DIRECT_SCRIPT_ID: ${{ matrix.scriptId || '' }}
+          SCRIPT_ID_NAME: ${{ matrix.scriptIdVar || '' }}
+          SCRIPT_ID_FROM_VAR: ${{ matrix.scriptIdVar && vars[matrix.scriptIdVar] || '' }}
+          SCRIPT_ID_FROM_SECRET: ${{ matrix.scriptIdVar && secrets[matrix.scriptIdVar] || '' }}
+        run: |
+          SCRIPT_ID="${DIRECT_SCRIPT_ID:-${SCRIPT_ID_FROM_VAR:-$SCRIPT_ID_FROM_SECRET}}"
+          if [ -z "${SCRIPT_ID}" ]; then
+            echo "No script ID resolved for tenant ${TENANT_NAME}.";
+            if [ -n "${SCRIPT_ID_NAME}" ]; then
+              echo "No GitHub variable or secret found for ${SCRIPT_ID_NAME}.";
+            fi
+            exit 1;
+          fi
+          echo "script_id=${SCRIPT_ID}" >> "$GITHUB_OUTPUT"
+
+      - name: Execute remote Apps Script tests
+        env:
+          GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
+          SCRIPT_ID: ${{ steps.resolve-script-id.outputs.script_id }}
+        run: node scripts/run_tests.js
+
+  deploy-prod:
+    name: Deploy Prod Tenant
+    needs: prepare-matrix
+    runs-on: ubuntu-latest
+    environment: prod
+    if: github.event_name == 'workflow_dispatch' && inputs.deploy_stage == 'prod'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.prepare-matrix.outputs.prod_matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install clasp
+        run: npm install -g @google/clasp
+
+      - name: Resolve tenant script ID
+        env:
+          TENANT_NAME: ${{ matrix.name }}
+          DIRECT_SCRIPT_ID: ${{ matrix.scriptId || '' }}
+          SCRIPT_ID_NAME: ${{ matrix.scriptIdVar || '' }}
+          SCRIPT_ID_FROM_VAR: ${{ matrix.scriptIdVar && vars[matrix.scriptIdVar] || '' }}
+          SCRIPT_ID_FROM_SECRET: ${{ matrix.scriptIdVar && secrets[matrix.scriptIdVar] || '' }}
+        run: |
+          SCRIPT_ID="${DIRECT_SCRIPT_ID:-${SCRIPT_ID_FROM_VAR:-$SCRIPT_ID_FROM_SECRET}}"
+          if [ -z "${SCRIPT_ID}" ]; then
+            echo "No script ID resolved for tenant ${TENANT_NAME}.";
+            if [ -n "${SCRIPT_ID_NAME}" ]; then
+              echo "No GitHub variable or secret found for ${SCRIPT_ID_NAME}.";
+            fi
+            exit 1;
+          fi
+          SCRIPT_ID="${SCRIPT_ID}" bash scripts/create_clasp_json.sh
+
+      - name: Authenticate clasp using service account credentials
+        env:
+          GCP_CREDS: ${{ secrets.GCP_CREDENTIALS }}
+        run: |
+          if [ -z "${GCP_CREDS}" ]; then
+            echo "GCP_CREDENTIALS secret is not set.";
+            exit 1;
+          fi
+          echo "${GCP_CREDS}" > gcp-creds.json
+          clasp login --creds gcp-creds.json
+
+      - name: Push project to Apps Script
+        run: clasp push --force
+
+      - name: Create deployment version (best-effort)
+        env:
+          TENANT_NAME: ${{ matrix.name }}
+        run: clasp deploy -v "GitHub Actions deploy (${TENANT_NAME})" || echo "clasp deploy failed; files were still pushed."
+
+      - name: Cleanup credentials
+        run: |
+          shred -u gcp-creds.json || rm -f gcp-creds.json || true
+          rm -f .clasp.json || true
+
+# Tenant registry notes:
+# - deploy/tenants.json is the source of truth for dev/prod tenant membership.
+# - Each tenant can define a direct "scriptId" or a "scriptIdVar" that points to a
+#   GitHub variable or secret containing the target script ID.
+# - Dev tenants deploy automatically on push to main and then run remote tests.
+# - Prod tenants deploy only via manual workflow_dispatch and can be further gated
+#   with required reviewers on the "prod" GitHub environment.

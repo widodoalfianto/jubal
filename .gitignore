@@ -1,0 +1,41 @@
+### Operating system
+.DS_Store
+
+### Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+### Editor/IDE
+.vscode/
+.idea/
+*.sublime-* 
+
+### Local env / secrets
+.env
+.env.*
+gcp-creds.json
+service-account-*.json
+*-key.json
+credentials.json
+client_secret.json
+
+### clasp / Google auth
+.clasp.json
+.clasprc.json
+
+### Build / logs
+dist/
+build/
+coverage/
+*.log
+
+### Misc
+*.pem
+*.key
+.Trash-
+
+# Keep the example for .clasp.json in the repo
+!.clasp.json.example
+

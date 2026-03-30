@@ -76,3 +76,25 @@ If you'd like to collaborate on the Google Sheets file directly, please email:
 ## 🙌 Contributions
 
 Pull requests are welcome! Feel free to fork the repo, make changes, and open a PR.
+
+---
+
+## Monthly Events & Overrides
+
+You can override or add special events for any month using the `Monthly Events` sheet (create it in the spreadsheet). Columns:
+- **Year**: numeric year (e.g. `2026`)
+- **Month**: numeric month (`1`-`12`) or month name (`March`)
+- **Date**: a date for the event (supports `MM/DD`, `YYYY-MM-DD`, `Mar 29`, etc.)
+- **Label**: short label (e.g. `Easter`, `Christmas`, `Corporate Prayer`)
+- **Type**: optional free-text field
+
+Behavior:
+- If `Monthly Events` contains entries for a year+month, those entries become the authoritative service dates for that month.
+- Otherwise the script falls back to the default algorithm (first Friday as Corporate Prayer + all Sundays), or uses an existing Availability sheet header if present.
+
+Admin workflows:
+- To override a single event (e.g. move Corporate Prayer to the 2nd Friday), add a row to `Monthly Events` with the desired date and label for that month.
+- To add special events (Easter, Christmas), add rows in `Monthly Events` for the relevant months.
+- After editing the Availability sheet header manually, run `syncCurrentFormWithAvailability()` from the Apps Script editor to update the live form's date choices.
+
+This makes the Availability sheet header the authoritative source for the form choices and scheduling matrix, so manual edits are supported.

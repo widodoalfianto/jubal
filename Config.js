@@ -9,7 +9,10 @@ const CONFIG = {
   },
   sheetNames: {
     ministryMembers: "Ministry Members",
-    formMetadata: "Form Metadata"
+    formMetadata: "Form Metadata",
+    settings: "Settings",
+    recurringEvents: "Recurring Events",
+    monthlyEvents: "Monthly Events"
   },
   formHeaders: {
     name: 'Select your name',
@@ -25,6 +28,13 @@ const CONFIG = {
     comments: 'Comments'
   },
   roles: ["WL", "SINGER", "ACOUSTIC", "KEYBOARD", "EG", "BASS", "DRUMS"],
+  defaults: {
+    churchName: "Music Ministry",
+    timeZone: "America/Los_Angeles",
+    formCreationDay: 8,
+    timesChoices: ["1", "2", "3", "4", "5"],
+    availabilitySheetSuffix: "Availability"
+  },
   layout: {
     headerRowIndex: 13,
     dateRowIndex: 1
