@@ -684,10 +684,10 @@ function getDefaultSettingsSheetRows() {
 
 function getDefaultAdminsSheetRows() {
   return [
-    ['Enabled', 'Name', 'Email', 'Notes'],
-    [true, 'Primary Admin', 'admin1@example.com', 'Main admin'],
-    [true, 'Backup Admin', 'admin2@example.com', 'Also receives alerts'],
-    [false, 'Example Admin', 'ignore@example.com', 'Example row']
+    ['Enabled', 'Email', 'Notes'],
+    [true, 'admin1@example.com', 'Main admin'],
+    [true, 'admin2@example.com', 'Also receives alerts'],
+    [false, 'ignore@example.com', 'Example row']
   ];
 }
 

@@ -169,7 +169,6 @@ Use the `Admins` sheet to control who receives reminders and alerts.
 
 Columns:
 - **Enabled**: check this when the person should receive notifications
-- **Name**: optional display name for the team
 - **Email**: validated email address
 - **Notes**: optional admin-facing note
 

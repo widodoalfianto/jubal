@@ -2223,26 +2223,53 @@ function configureEventsSheetUi(sheet) {
 function getAdminsSeedRows(emails) {
   const adminEmails = normalizeEmailList(emails && emails.length ? emails : CONFIG.ids.adminEmails);
   const rows = [
-    ['Enabled', 'Name', 'Email', 'Notes']
+    ['Enabled', 'Email', 'Notes']
   ];
 
   if (adminEmails.length) {
-    adminEmails.forEach((email, index) => {
+    adminEmails.forEach(email => {
       rows.push([
         true,
-        index === 0 ? 'Primary Admin' : '',
         email,
-        index === 0
-          ? 'Add more rows here when you want more admins to receive reminders and alerts.'
-          : ''
+        ''
       ]);
     });
   } else {
-    rows.push([true, 'Primary Admin', '', 'Enter the first admin email here.']);
+    rows.push([true, '', 'Enter the first admin email here.']);
   }
 
-  rows.push([false, 'Example Admin', 'admin@example.com', 'Example row']);
+  rows.push([false, 'admin@example.com', 'Example row']);
   return rows;
+}
+
+function normalizeAdminsSheetLayout(sheet) {
+  if (!sheet) return;
+
+  const desiredHeaders = ['Enabled', 'Email', 'Notes'];
+  const lastRow = Math.max(sheet.getLastRow(), 1);
+  const lastColumn = Math.max(sheet.getLastColumn(), 3);
+
+  if (sheet.getMaxColumns() < lastColumn) {
+    sheet.insertColumnsAfter(sheet.getMaxColumns(), lastColumn - sheet.getMaxColumns());
+  }
+
+  const existingHeaders = sheet.getRange(1, 1, 1, lastColumn).getDisplayValues()[0];
+  const headerMap = buildHeaderMap(existingHeaders);
+  const rows = [desiredHeaders];
+
+  if (lastRow > 1) {
+    const existingRows = sheet.getRange(2, 1, lastRow - 1, lastColumn).getValues();
+    existingRows.forEach(row => {
+      const enabled = getValueByHeader(row, headerMap, ['Enabled'], '');
+      const email = getValueByHeader(row, headerMap, ['Email'], '');
+      const notes = getValueByHeader(row, headerMap, ['Notes'], '') || getValueByHeader(row, headerMap, ['Name'], '');
+      rows.push([enabled, email, notes]);
+    });
+  }
+
+  sheet.clearContents();
+  sheet.getRange(1, 1, rows.length, desiredHeaders.length).setValues(rows);
+  sheet.getRange(1, 1, 1, desiredHeaders.length).setFontWeight('bold');
 }
 
 function configureAdminsSheetUi(sheet) {
@@ -2251,14 +2278,13 @@ function configureAdminsSheetUi(sheet) {
   sheet.setFrozenRows(1);
   setHeaderNotes(sheet, [
     'Check this when the admin should receive reminders and alerts.',
-    'Optional display name for your team.',
     'Email address used for admin reminders and alerts.',
     'Optional note for the team.'
   ]);
   applyCheckboxColumn(sheet, 1, maxRows);
-  applyEmailColumn(sheet, 3, maxRows);
+  applyEmailColumn(sheet, 2, maxRows);
   applySheetTheme(sheet);
-  highlightExampleRows(sheet, 4);
+  highlightExampleRows(sheet, 3);
   fitSheetToContent(sheet);
   applyTableBordersToDataRange(sheet);
 }
@@ -3421,10 +3447,11 @@ function initializeProject() {
   let adminsSheet = ss.getSheetByName(CONFIG.sheetNames.admins);
   if (!adminsSheet) {
     adminsSheet = ss.insertSheet(CONFIG.sheetNames.admins);
-    adminsSheet.getRange(1, 1, 1, 4).setValues([getAdminsSeedRows(loadRuntimeSettings().adminEmails)[0]]);
+    adminsSheet.getRange(1, 1, 1, 3).setValues([getAdminsSeedRows(loadRuntimeSettings().adminEmails)[0]]);
     console.log("Created Admins sheet.");
   }
-  adminsSheet.getRange(1, 1, 1, 4).setFontWeight('bold');
+  normalizeAdminsSheetLayout(adminsSheet);
+  adminsSheet.getRange(1, 1, 1, 3).setFontWeight('bold');
   seedSheetRowsIfEmpty(adminsSheet, getAdminsSeedRows(loadRuntimeSettings().adminEmails));
   if (sheetUsesFriendlyAdminsLayout(adminsSheet)) {
     configureAdminsSheetUi(adminsSheet);
