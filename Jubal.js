@@ -526,9 +526,20 @@ function getMinistryMembersColumnMap() {
 function fitSheetToContent(sheet) {
   if (!sheet || sheet.getLastRow() < 1 || sheet.getLastColumn() < 1) return;
   const range = sheet.getDataRange();
-  range.setWrap(true);
+  range.setWrap(false);
   sheet.autoResizeColumns(1, sheet.getLastColumn());
-  sheet.autoResizeRows(1, sheet.getLastRow());
+}
+
+function applyTableBorder(sheet, startRow, startColumn, numRows, numColumns) {
+  if (!sheet || numRows <= 0 || numColumns <= 0) return;
+  sheet
+    .getRange(startRow, startColumn, numRows, numColumns)
+    .setBorder(true, true, true, true, true, true, '#d9d9d9', SpreadsheetApp.BorderStyle.SOLID);
+}
+
+function applyTableBordersToDataRange(sheet) {
+  if (!sheet || sheet.getLastRow() < 1 || sheet.getLastColumn() < 1) return;
+  applyTableBorder(sheet, 1, 1, sheet.getLastRow(), sheet.getLastColumn());
 }
 
 function highlightExampleRows(sheet, notesColumnNumber) {
@@ -1344,6 +1355,8 @@ function addReconciliationEntry(e, submittedName, matchedCanonical, parseErrors,
     const errorsStr = Array.isArray(parseErrors) ? parseErrors.join('; ') : (parseErrors || '');
     const rowIndex = sheet.getLastRow() + 1;
     sheet.appendRow([ts, formId, submittedName || '', matchedCanonical || '', errorsStr, actionRequired || '', '']);
+    fitSheetToContent(sheet);
+    applyTableBordersToDataRange(sheet);
 
     // Send immediate alert for this reconciliation item (can be changed to digest later)
     sendReconciliationAlert(sheet, rowIndex);
@@ -2068,6 +2081,7 @@ function configureRecurringSheetUi(sheet) {
   applyCheckboxColumn(sheet, 9, maxRows);
   applySheetTheme(sheet);
   fitSheetToContent(sheet);
+  applyTableBordersToDataRange(sheet);
 }
 
 function configureEventsSheetUi(sheet) {
@@ -2097,6 +2111,7 @@ function configureEventsSheetUi(sheet) {
   applySheetTheme(sheet);
   highlightExampleRows(sheet, 8);
   fitSheetToContent(sheet);
+  applyTableBordersToDataRange(sheet);
 }
 
 function getAdminsSeedRows(emails) {
@@ -2138,6 +2153,7 @@ function configureAdminsSheetUi(sheet) {
   applyEmailColumn(sheet, 3, maxRows);
   applySheetTheme(sheet);
   fitSheetToContent(sheet);
+  applyTableBordersToDataRange(sheet);
 }
 
 function getRolesSeedRows(roles) {
@@ -2174,6 +2190,7 @@ function configureRolesSheetUi(sheet) {
   applySheetTheme(sheet);
   highlightExampleRows(sheet, 3);
   fitSheetToContent(sheet);
+  applyTableBordersToDataRange(sheet);
 }
 
 function getRecurringSeedRows() {
@@ -2360,6 +2377,7 @@ function configureSettingsSheetUi(sheet) {
   });
 
   fitSheetToContent(sheet);
+  applyTableBordersToDataRange(sheet);
 }
 
 function ensureEventsArchiveSheet() {
@@ -2380,6 +2398,7 @@ function ensureEventsArchiveSheet() {
 
   applySheetTheme(sheet);
   fitSheetToContent(sheet);
+  applyTableBordersToDataRange(sheet);
 
   return sheet;
 }
@@ -2650,6 +2669,7 @@ function configureMinistryMembersRoles(sheet, roles) {
   ensureRolesFormulaColumn(sheet, roles);
   applySheetTheme(sheet);
   fitSheetToContent(sheet);
+  applyTableBordersToDataRange(sheet);
 }
 
 function hasRoleCheckboxColumnsConfigured(sheet, roles) {
@@ -2859,7 +2879,8 @@ function setupAvailability(sheetName, year, month) {
   sheet.insertRowsAfter(insertionRow, 3);
 
   // Add "Availability" above the role section
-  sheet.getRange(insertionRow + 3, 1).setValue("Availability").setFontWeight("bold");
+  const availabilityHeaderRow = insertionRow + 3;
+  sheet.getRange(availabilityHeaderRow, 1).setValue("Availability").setFontWeight("bold");
   const availabilityRange = sheet.getRange(sheet.getLastRow(), 1, 1, sheet.getLastColumn());
   availabilityRange.setFontWeight("bold"); // Make the "Availability" text bold
 
@@ -2875,6 +2896,8 @@ function setupAvailability(sheetName, year, month) {
   });
 
   fitSheetToContent(sheet);
+  applyTableBorder(sheet, 1, 1, roles.length + 1, headerRow.length);
+  applyTableBorder(sheet, availabilityHeaderRow, 1, roles.length + 1, headerRow.length);
 }
 
 function clearByHeader(header) {
@@ -3220,6 +3243,7 @@ function initializeProject() {
   dbSheet.getRange(1, 1, 1, 6).setFontWeight("bold");
   applySheetTheme(dbSheet);
   fitSheetToContent(dbSheet);
+  applyTableBordersToDataRange(dbSheet);
 
   // 2. Create Form Metadata sheet if it doesn't exist
   let metaSheet = ss.getSheetByName(CONFIG.sheetNames.formMetadata);
@@ -3230,6 +3254,7 @@ function initializeProject() {
   }
   applySheetTheme(metaSheet);
   fitSheetToContent(metaSheet);
+  applyTableBordersToDataRange(metaSheet);
 
   // 3. Create Settings sheet if it doesn't exist
   let settingsSheet = ss.getSheetByName(CONFIG.sheetNames.settings);
