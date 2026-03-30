@@ -33,7 +33,7 @@ To use this workflow for your own ministry, follow these steps:
 ### 2. Configuration (`Config.js`)
 Update the `CONFIG` object with your specific details:
 - **`ids.formsFolder`**: The ID of a Google Drive folder where monthly forms will be stored.
-- **`ids.adminEmails`**: A list of email addresses that should receive notifications.
+- **`ids.adminEmails`**: Starter admin emails used as a fallback until the `Admins` sheet is set up.
 - **`roles`**: Update the array with the specific roles in your ministry (e.g., "WL", "Keys", "Media").
 
 ### 3. Initialization
@@ -42,12 +42,14 @@ Update the `CONFIG` object with your specific details:
    - `Ministry Members`
    - `Form Metadata`
    - `Settings`
+   - `Admins`
    - `Recurring`
    - `Events`
 3. **Important**: Delete the dummy row in "Ministry Members" and add your actual team members.
 4. `initializeProject()` now also tries to switch role entry to checkboxes when it is safe.
    It adds role checkbox columns starting in column `G` and makes the `Roles` column auto-generate from those checkboxes.
 5. If `initializeProject()` skips that migration because columns `G+` already contain data, you can review the sheet and run `migrateMemberRolesToCheckboxes()` manually.
+6. Use the `Admins` sheet to add or remove notification recipients with checkboxes and email validation. The old `admin_emails` setting remains as a fallback.
 
 ### 4. Triggers
 Set up the automation triggers in the Apps Script dashboard (Clock icon on the left):
@@ -155,10 +157,23 @@ Admin workflows:
 - To add special events (Good Friday, retreat nights, Christmas Eve), add rows in `Events` for the relevant dates.
 - After editing the Availability sheet header manually, run `syncCurrentFormWithAvailability()` from the Apps Script editor to update the live form's date choices.
 
+## Admins
+
+Use the `Admins` sheet to control who receives reminders and alerts.
+
+Columns:
+- **Enabled**: check this when the person should receive notifications
+- **Name**: optional display name for the team
+- **Email**: validated email address
+- **Notes**: optional admin-facing note
+
+This is the preferred self-service place for managing notification recipients. Admins can simply add a new row, enter the email address, and check **Enabled**.
+
 Useful settings:
-- `admin_emails`: comma-separated email addresses for all admins who should receive reminders and alerts
+- `admin_emails`: legacy fallback if the `Admins` sheet is not being used yet
 - `admin_reminder_enabled`: `TRUE` or `FALSE`
 - `admin_reminder_day`: day of month to remind admins to review next month before the form is created
+- `form_creation_day`: the monthly setup day shown in reminder emails; keep your Apps Script trigger aligned with it
 - `events_archive_frequency`: `Off`, `Monthly`, `Quarterly`, or `Yearly`
 - `events_archive_month`: month to run yearly archiving, such as `January`
 

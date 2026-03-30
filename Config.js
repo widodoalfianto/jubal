@@ -12,6 +12,7 @@ const CONFIG = {
     formMetadata: "Form Metadata",
     reconciliation: "Reconciliation",
     settings: "Settings",
+    admins: "Admins",
     recurring: "Recurring",
     events: "Events",
     eventsArchive: "Events Archive",

@@ -282,6 +282,18 @@ function parseCsv(value) {
     .filter(Boolean);
 }
 
+function normalizeEmailList(values) {
+  const seen = {};
+  return parseCsv(values)
+    .map(email => String(email || '').trim())
+    .filter(email => {
+      const normalized = email.toLowerCase();
+      if (!normalized || seen[normalized]) return false;
+      seen[normalized] = true;
+      return true;
+    });
+}
+
 function parseBooleanLike(value, fallback) {
   if (value === null || value === undefined || value === '') return fallback;
   if (typeof value === 'boolean') return value;
@@ -336,6 +348,28 @@ function loadKeyValueSheet(sheetName) {
   return out;
 }
 
+function loadAdminEmailsFromSheet() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(CONFIG.sheetNames.admins);
+  if (!sheet || sheet.getLastRow() < 2) return [];
+
+  const headerMap = getSheetHeaderMap(sheet);
+  if (!Object.prototype.hasOwnProperty.call(headerMap, 'email')) return [];
+
+  const rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getValues();
+  const emails = rows
+    .map(row => {
+      const enabled = Object.prototype.hasOwnProperty.call(headerMap, 'enabled')
+        ? parseBooleanLike(getValueByHeader(row, headerMap, ['Enabled'], false), false)
+        : true;
+      const email = String(getValueByHeader(row, headerMap, ['Email'], '') || '').trim();
+      return enabled && email ? email : '';
+    })
+    .filter(Boolean);
+
+  return normalizeEmailList(emails);
+}
+
 function getDefaultRuntimeSettings() {
   return {
     churchName: CONFIG.defaults.churchName,
@@ -356,13 +390,23 @@ function getDefaultRuntimeSettings() {
 function loadRuntimeSettings() {
   const defaults = getDefaultRuntimeSettings();
   const raw = loadKeyValueSheet(CONFIG.sheetNames.settings);
-  if (!Object.keys(raw).length) return defaults;
+  const sheetAdminEmails = loadAdminEmailsFromSheet();
+  if (!Object.keys(raw).length) {
+    if (sheetAdminEmails.length) {
+      const fallbackDefaults = Object.assign({}, defaults);
+      fallbackDefaults.adminEmails = sheetAdminEmails;
+      return fallbackDefaults;
+    }
+    return defaults;
+  }
+
+  const configuredAdminEmails = normalizeEmailList(raw.admin_emails);
 
   const settings = {
     churchName: String(raw.church_name || defaults.churchName).trim() || defaults.churchName,
     timeZone: String(raw.time_zone || defaults.timeZone).trim() || defaults.timeZone,
     formsFolder: String(raw.forms_folder_id || defaults.formsFolder).trim() || defaults.formsFolder,
-    adminEmails: parseCsv(raw.admin_emails),
+    adminEmails: sheetAdminEmails.length ? sheetAdminEmails : configuredAdminEmails,
     roles: parseCsv(raw.roles),
     formCreationDay: toIntegerOrDefault(raw.form_creation_day, defaults.formCreationDay),
     timesChoices: parseCsv(raw.times_choices),
@@ -385,9 +429,7 @@ function loadRuntimeSettings() {
 
 function getAdminRecipientList(settings) {
   const runtimeSettings = settings || loadRuntimeSettings();
-  return (runtimeSettings.adminEmails || [])
-    .map(email => String(email || '').trim())
-    .filter(Boolean);
+  return normalizeEmailList(runtimeSettings.adminEmails || []);
 }
 
 function getAdminRecipientString(settings) {
@@ -406,6 +448,18 @@ function formatHumanDateTime(value, timeZone) {
   const parsed = Object.prototype.toString.call(value) === '[object Date]' ? value : new Date(value);
   if (isNaN(parsed.getTime())) return String(value);
   return Utilities.formatDate(parsed, timeZone || safeGetScriptTimeZone(), "MMMM d, yyyy 'at' h:mm a z");
+}
+
+function formatDayOfMonthHuman(day) {
+  const parsed = toIntegerOrDefault(day, 0);
+  if (parsed <= 0) return '';
+  const mod100 = parsed % 100;
+  if (mod100 >= 11 && mod100 <= 13) return `${parsed}th`;
+  const mod10 = parsed % 10;
+  if (mod10 === 1) return `${parsed}st`;
+  if (mod10 === 2) return `${parsed}nd`;
+  if (mod10 === 3) return `${parsed}rd`;
+  return `${parsed}th`;
 }
 
 function getSheetRangeUrl(sheet, rowIndex, startColumnLetter, endColumnLetter) {
@@ -593,6 +647,12 @@ function sheetUsesFriendlyEventsLayout(sheet) {
   return Object.prototype.hasOwnProperty.call(headerMap, 'event') &&
     Object.prototype.hasOwnProperty.call(headerMap, 'action') &&
     Object.prototype.hasOwnProperty.call(headerMap, 'recurring event');
+}
+
+function sheetUsesFriendlyAdminsLayout(sheet) {
+  const headerMap = getSheetHeaderMap(sheet);
+  return Object.prototype.hasOwnProperty.call(headerMap, 'enabled') &&
+    Object.prototype.hasOwnProperty.call(headerMap, 'email');
 }
 
 function getConfiguredRecurringSheet() {
@@ -1543,6 +1603,7 @@ function buildAdminPlanningReminder(referenceDate, settings) {
   planDate.setMonth(planDate.getMonth() + 1);
 
   const planMonthName = Utilities.formatDate(planDate, runtimeSettings.timeZone, 'MMMM yyyy');
+  const monthlySetupDay = formatDayOfMonthHuman(runtimeSettings.formCreationDay);
   const subject = `Jubal Reminder: Please review ${planMonthName}`;
   const bodyLines = [
     `Please review the schedule setup for ${planMonthName}.`,
@@ -1551,12 +1612,15 @@ function buildAdminPlanningReminder(referenceDate, settings) {
     `- Recurring schedule: ${getSheetUrlByName(CONFIG.sheetNames.recurring)}`,
     `- One-time events and changes: ${getSheetUrlByName(CONFIG.sheetNames.events)}`,
     `- Ministry members and role updates: ${getSheetUrlByName(CONFIG.sheetNames.ministryMembers)}`,
+    `- Admin contacts and notifications: ${getSheetUrlByName(CONFIG.sheetNames.admins)}`,
     '',
     'Recommended checklist:',
     '- Confirm your normal recurring events are correct.',
     '- Add any special events, cancellations, or moved dates for next month.',
     '- Add any new members or update role checkboxes as needed.',
+    '- Add or remove admin recipients in the Admins sheet if notification recipients need to change.',
     '',
+    `Monthly setup day: the ${monthlySetupDay} of each month.`,
     'Once that looks right, the next month form and availability sheet can be generated by the monthly setup trigger.',
     `Reminder date: ${formatHumanDateTime(today, runtimeSettings.timeZone)}`
   ];
@@ -1722,6 +1786,15 @@ function applyCheckboxColumn(sheet, column, numRows) {
   sheet.getRange(2, column, numRows, 1).insertCheckboxes();
 }
 
+function applyEmailColumn(sheet, column, numRows) {
+  if (!sheet || numRows <= 0) return;
+  const rule = SpreadsheetApp.newDataValidation()
+    .requireTextIsEmail()
+    .setAllowInvalid(false)
+    .build();
+  sheet.getRange(2, column, numRows, 1).setDataValidation(rule);
+}
+
 function applyDropdownColumn(sheet, column, values, numRows, allowInvalid) {
   if (!sheet || numRows <= 0) return;
   const rule = SpreadsheetApp.newDataValidation()
@@ -1826,6 +1899,47 @@ function configureEventsSheetUi(sheet) {
   sheet.autoResizeColumns(1, Math.min(8, sheet.getLastColumn()));
 }
 
+function getAdminsSeedRows(emails) {
+  const adminEmails = normalizeEmailList(emails && emails.length ? emails : CONFIG.ids.adminEmails);
+  const rows = [
+    ['Enabled', 'Name', 'Email', 'Notes']
+  ];
+
+  if (adminEmails.length) {
+    adminEmails.forEach((email, index) => {
+      rows.push([
+        true,
+        index === 0 ? 'Primary Admin' : '',
+        email,
+        index === 0
+          ? 'Add more rows here when you want more admins to receive reminders and alerts.'
+          : ''
+      ]);
+    });
+  } else {
+    rows.push([true, 'Primary Admin', '', 'Enter the first admin email here.']);
+  }
+
+  rows.push([false, '', '', 'Example extra admin row. Check Enabled when ready to use it.']);
+  return rows;
+}
+
+function configureAdminsSheetUi(sheet) {
+  if (!sheet) return;
+  const maxRows = Math.max(sheet.getMaxRows() - 1, 1);
+  sheet.setFrozenRows(1);
+  styleConfigHeader(sheet, ['#d9ead3', '#fce5cd', '#cfe2f3', '#ead1dc']);
+  setHeaderNotes(sheet, [
+    'Check this when the admin should receive reminders and alerts.',
+    'Optional display name for your team.',
+    'Email address used for admin reminders and alerts.',
+    'Optional note for the team.'
+  ]);
+  applyCheckboxColumn(sheet, 1, maxRows);
+  applyEmailColumn(sheet, 3, maxRows);
+  sheet.autoResizeColumns(1, Math.min(4, sheet.getLastColumn()));
+}
+
 function getRecurringSeedRows() {
   return [
     ['Enabled', 'Event', 'Frequency', 'Weekday', 'Week Of Month', 'Month', 'Day', 'Include In Form', 'Include In Schedule', 'Notes'],
@@ -1869,9 +1983,9 @@ function getSettingsSeedRows() {
     ['church_name', CONFIG.defaults.churchName, 'Used in form titles and notifications'],
     ['time_zone', safeGetScriptTimeZone(), 'IANA timezone for event generation'],
     ['forms_folder_id', CONFIG.ids.formsFolder, 'Drive folder where forms are moved after creation'],
-    ['admin_emails', CONFIG.ids.adminEmails.join(','), 'Comma-separated admin recipients'],
+    ['admin_emails', CONFIG.ids.adminEmails.join(','), 'Legacy fallback only. Prefer the Admins sheet for a friendlier admin list.'],
     ['roles', CONFIG.roles.join(','), 'Comma-separated ministry roles'],
-    ['form_creation_day', CONFIG.defaults.formCreationDay, 'Reserved for future time-driven setup'],
+    ['form_creation_day', CONFIG.defaults.formCreationDay, 'Monthly setup day shown to admins in reminder emails. Keep your Apps Script trigger aligned with this day.'],
     ['admin_reminder_enabled', CONFIG.defaults.adminReminderEnabled, 'TRUE or FALSE. When TRUE, send planning reminders to admins.'],
     ['admin_reminder_day', CONFIG.defaults.adminReminderDay, 'Day of month to send the admin planning reminder for next month.'],
     ['times_choices', CONFIG.defaults.timesChoices.join(','), 'Comma-separated willingness choices'],
@@ -1923,6 +2037,13 @@ function configureSettingsSheetUi(sheet) {
       valueRange.setDataValidation(
         SpreadsheetApp.newDataValidation()
           .requireValueInList(['Off', 'Monthly', 'Quarterly', 'Yearly'], true)
+          .setAllowInvalid(false)
+          .build()
+      );
+    } else if (key === 'form_creation_day') {
+      valueRange.setDataValidation(
+        SpreadsheetApp.newDataValidation()
+          .requireNumberBetween(1, 28)
           .setAllowInvalid(false)
           .build()
       );
@@ -2678,6 +2799,19 @@ function initializeProject() {
   ensureSettingsSheetRows(settingsSheet, getSettingsSeedRows());
   configureSettingsSheetUi(settingsSheet);
 
+  // 4. Create Admins sheet if it doesn't exist
+  let adminsSheet = ss.getSheetByName(CONFIG.sheetNames.admins);
+  if (!adminsSheet) {
+    adminsSheet = ss.insertSheet(CONFIG.sheetNames.admins);
+    adminsSheet.getRange(1, 1, 1, 4).setValues([getAdminsSeedRows(loadRuntimeSettings().adminEmails)[0]]);
+    console.log("Created Admins sheet.");
+  }
+  adminsSheet.getRange(1, 1, 1, 4).setFontWeight('bold');
+  seedSheetRowsIfEmpty(adminsSheet, getAdminsSeedRows(loadRuntimeSettings().adminEmails));
+  if (sheetUsesFriendlyAdminsLayout(adminsSheet)) {
+    configureAdminsSheetUi(adminsSheet);
+  }
+
   const roleMigrationResult = maybeMigrateMemberRolesDuringSetup();
   if (roleMigrationResult && roleMigrationResult.status === 'migrated') {
     console.log('Initialized role checkbox workflow in Ministry Members.');
@@ -2685,7 +2819,7 @@ function initializeProject() {
     console.log('Role checkbox workflow already configured in Ministry Members.');
   }
 
-  // 4. Migrate legacy sheet names to the friendlier go-forward names when possible.
+  // 5. Migrate legacy sheet names to the friendlier go-forward names when possible.
   let recurringSheet = ss.getSheetByName(CONFIG.sheetNames.recurring);
   let eventsSheet = ss.getSheetByName(CONFIG.sheetNames.events);
   let legacyRecurringSheet = ss.getSheetByName(CONFIG.sheetNames.recurringEvents);
@@ -2712,7 +2846,7 @@ function initializeProject() {
     console.log("Renamed Monthly Events sheet to Events.");
   }
 
-  // 5. Create the new Recurring sheet if no recurring configuration exists.
+  // 6. Create the new Recurring sheet if no recurring configuration exists.
   if (!recurringSheet && !legacyRecurringSheet) {
     recurringSheet = ss.insertSheet(CONFIG.sheetNames.recurring);
     recurringSheet.getRange(1, 1, 1, 10).setValues([getRecurringSeedRows()[0]]);
@@ -2724,7 +2858,7 @@ function initializeProject() {
     configureRecurringSheetUi(recurringSheet);
   }
 
-  // 6. Create the new Events sheet for month-specific additions/removals.
+  // 7. Create the new Events sheet for month-specific additions/removals.
   if (!eventsSheet) {
     eventsSheet = ss.insertSheet(CONFIG.sheetNames.events);
     eventsSheet.getRange(1, 1, 1, 8).setValues([getEventsSeedRows()[0]]);

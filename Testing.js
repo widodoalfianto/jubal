@@ -429,14 +429,26 @@ function runUnitTests() {
     if (getAdminRecipientString({ adminEmails: ['admin1@example.com', ' admin2@example.com '] }) !== 'admin1@example.com,admin2@example.com') {
       throw new Error('Admin email list did not normalize correctly');
     }
+    replaceSheetContents(CONFIG.sheetNames.admins, getDefaultAdminsSheetRows());
+    const settingsFromSheet = loadRuntimeSettings();
+    if (getAdminRecipientString(settingsFromSheet) !== 'admin1@example.com,admin2@example.com') {
+      throw new Error('Admins sheet should be the preferred source for admin recipients');
+    }
     const reminder = buildAdminPlanningReminder(new Date(2026, 2, 5), {
       churchName: 'Jubal Test',
       timeZone: safeGetScriptTimeZone(),
-      adminEmails: ['admin@example.com']
+      adminEmails: ['admin@example.com'],
+      formCreationDay: 8
     });
     if (reminder.subject.indexOf('April 2026') === -1) throw new Error('Reminder subject should reference next month');
     if (reminder.body.indexOf('Recurring schedule') === -1 || reminder.body.indexOf('One-time events and changes') === -1) {
       throw new Error('Reminder body should guide admins to Recurring and Events');
+    }
+    if (reminder.body.indexOf('Monthly setup day: the 8th of each month.') === -1) {
+      throw new Error('Reminder should mention the configured monthly setup day');
+    }
+    if (reminder.body.indexOf('Admin contacts and notifications') === -1) {
+      throw new Error('Reminder should link admins to the Admins sheet');
     }
     recordResult('adminReminder:content', true, reminder.subject);
   } catch (e) { recordResult('adminReminder:content', false, e.message); }
@@ -511,7 +523,9 @@ function runIntegrationTests() {
     const dbSheet = ss.getSheetByName(CONFIG.sheetNames.ministryMembers);
     const runtimeSettings = loadRuntimeSettings();
     const settingsSheet = ss.getSheetByName(CONFIG.sheetNames.settings);
+    const adminsSheet = ss.getSheetByName(CONFIG.sheetNames.admins);
     if (!settingsSheet) throw new Error('Settings sheet missing');
+    if (!adminsSheet) throw new Error('Admins sheet missing');
     const settingsValues = settingsSheet.getRange(2, 1, settingsSheet.getLastRow() - 1, 1).getDisplayValues().flat();
     if (!ss.getSheetByName(CONFIG.sheetNames.recurring) && !ss.getSheetByName(CONFIG.sheetNames.recurringEvents)) {
       throw new Error('Recurring sheet missing');
@@ -533,6 +547,9 @@ function runIntegrationTests() {
     }
     if (settingsValues.indexOf('admin_reminder_enabled') === -1 || settingsValues.indexOf('admin_reminder_day') === -1) {
       throw new Error('Admin reminder settings were not created in Settings');
+    }
+    if (!sheetUsesFriendlyAdminsLayout(adminsSheet)) {
+      throw new Error('Admins sheet does not use the friendly admin layout');
     }
     recordResult('initializeProject:configSheets', true, 'Configuration sheets created');
   } catch (e) { recordResult('initializeProject:configSheets', false, e.message); }
@@ -622,15 +639,24 @@ function getDefaultSettingsSheetRows() {
     ['church_name', CONFIG.defaults.churchName, 'Used in form titles and notifications'],
     ['time_zone', safeGetScriptTimeZone(), 'IANA timezone for event generation'],
     ['forms_folder_id', CONFIG.ids.formsFolder, 'Drive folder where forms are moved after creation'],
-    ['admin_emails', CONFIG.ids.adminEmails.join(','), 'Comma-separated admin recipients'],
+    ['admin_emails', CONFIG.ids.adminEmails.join(','), 'Legacy fallback only. Prefer the Admins sheet for a friendlier admin list.'],
     ['roles', CONFIG.roles.join(','), 'Comma-separated ministry roles'],
-    ['form_creation_day', CONFIG.defaults.formCreationDay, 'Reserved for future time-driven setup'],
+    ['form_creation_day', CONFIG.defaults.formCreationDay, 'Monthly setup day shown to admins in reminder emails. Keep your Apps Script trigger aligned with this day.'],
     ['admin_reminder_enabled', CONFIG.defaults.adminReminderEnabled, 'TRUE or FALSE. When TRUE, send planning reminders to admins.'],
     ['admin_reminder_day', CONFIG.defaults.adminReminderDay, 'Day of month to send the admin planning reminder for next month.'],
     ['times_choices', CONFIG.defaults.timesChoices.join(','), 'Comma-separated willingness choices'],
     ['availability_sheet_suffix', CONFIG.defaults.availabilitySheetSuffix, 'Suffix used for monthly availability tabs'],
     ['events_archive_frequency', CONFIG.defaults.eventsArchiveFrequency, 'Off, Monthly, Quarterly, or Yearly'],
     ['events_archive_month', CONFIG.defaults.eventsArchiveMonth, 'Month that yearly archiving should run, such as January']
+  ];
+}
+
+function getDefaultAdminsSheetRows() {
+  return [
+    ['Enabled', 'Name', 'Email', 'Notes'],
+    [true, 'Primary Admin', 'admin1@example.com', 'Main admin'],
+    [true, 'Backup Admin', 'admin2@example.com', 'Also receives alerts'],
+    [false, 'Example Admin', 'ignore@example.com', 'Disabled example row']
   ];
 }
 
