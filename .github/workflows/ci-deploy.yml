@@ -95,7 +95,9 @@ jobs:
           node-version: '18'
 
       - name: Install clasp
-        run: npm install -g @google/clasp
+        run: |
+          npm install -g @google/clasp@3.3.0
+          clasp --version
 
       - name: Resolve tenant script ID
         env:
@@ -150,7 +152,7 @@ jobs:
           '
 
       - name: Check clasp authorized user
-        run: clasp --auth "$RUNNER_TEMP/.clasprc.json" show-authorized-user --json
+        run: clasp --auth "$RUNNER_TEMP/.clasprc.json" show-authorized-user
 
       - name: Push project to Apps Script
         run: clasp --auth "$RUNNER_TEMP/.clasprc.json" push --force
@@ -228,7 +230,9 @@ jobs:
           node-version: '18'
 
       - name: Install clasp
-        run: npm install -g @google/clasp
+        run: |
+          npm install -g @google/clasp@3.3.0
+          clasp --version
 
       - name: Resolve tenant script ID
         env:
@@ -283,7 +287,7 @@ jobs:
           '
 
       - name: Check clasp authorized user
-        run: clasp --auth "$RUNNER_TEMP/.clasprc.json" show-authorized-user --json
+        run: clasp --auth "$RUNNER_TEMP/.clasprc.json" show-authorized-user
 
       - name: Push project to Apps Script
         run: clasp --auth "$RUNNER_TEMP/.clasprc.json" push --force
