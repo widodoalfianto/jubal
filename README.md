@@ -52,6 +52,7 @@ Update the `CONFIG` object with your specific details:
 5. If `initializeProject()` skips that migration because columns `G+` already contain data, you can review the sheet and run `migrateMemberRolesToCheckboxes()` manually.
 6. Use the `Admins` sheet to add or remove notification recipients with checkboxes and email validation.
 7. Use the `Roles` sheet to add or disable ministry roles. The system uses that sheet to build the role checkboxes in `Ministry Members`.
+8. `Ministry Members` is ordered for daily admin use: `Name`, `Unavailable Dates`, `Times Willing To Serve`, `Comments`, `Roles`, `Canonical Name`, then role checkboxes.
 
 ### 4. Triggers
 Set up the automation triggers in the Apps Script dashboard (Clock icon on the left):
@@ -184,6 +185,7 @@ Columns:
 - **Notes**: optional admin-facing note
 
 To add a new role, add a new row and check **Enabled**. The next setup/update cycle will sync that role into `Ministry Members`.
+The disabled example row stays at the top and is highlighted so admins can quickly see the pattern to follow.
 
 Useful settings:
 - `time_zone`: time zone used for event generation and reminder emails
@@ -193,6 +195,10 @@ Useful settings:
 - `times_choices`: the choices shown in the form question for how many times someone is willing to serve
 - `events_archive_frequency`: `Off`, `Monthly`, `Quarterly`, or `Yearly`
 - `forms_folder_id`: only change this if you want future monthly forms stored in a different Drive folder
+
+Availability tabs are now named only by month, such as `April` or `May`.
+
+The `Events` sheet keeps its example rows highlighted at the top so admins always have a simple pattern to copy when adding one-time events or cancellations.
 
 Archive timing:
 - `Monthly`: archives old one-time events on the 1st day of each month

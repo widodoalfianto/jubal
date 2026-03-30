@@ -103,7 +103,7 @@ function runFullSystemTest() {
   dbSheet.getRange(userRowIndex, roleColumnIndex).setValue(true);
   SpreadsheetApp.flush(); // Ensure the checkbox and derived Roles formula are saved before the script reads again
 
-  const derivedRoles = dbSheet.getRange(userRowIndex, 2).getDisplayValue();
+  const derivedRoles = dbSheet.getRange(userRowIndex, getMinistryMembersColumnMap().roles).getDisplayValue();
   if (derivedRoles.indexOf(testRole) === -1) {
     throw new Error(`Derived Roles column did not include '${testRole}'. Found '${derivedRoles}'`);
   }
@@ -538,6 +538,7 @@ function runIntegrationTests() {
     initializeProject();
     const dbSheet = ss.getSheetByName(CONFIG.sheetNames.ministryMembers);
     const runtimeSettings = loadRuntimeSettings();
+    const memberColumns = getMinistryMembersColumnMap();
     const settingsSheet = ss.getSheetByName(CONFIG.sheetNames.settings);
     const adminsSheet = ss.getSheetByName(CONFIG.sheetNames.admins);
     const rolesSheet = ss.getSheetByName(CONFIG.sheetNames.rolesConfig);
@@ -551,13 +552,22 @@ function runIntegrationTests() {
     if (!ss.getSheetByName(CONFIG.sheetNames.events) && !ss.getSheetByName(CONFIG.sheetNames.monthlyEvents)) {
       throw new Error('Events sheet missing');
     }
-    if (!dbSheet || dbSheet.getRange(1, 6).getValue() !== CONFIG.sheetHeaders.canonicalName) {
+    if (!dbSheet || dbSheet.getRange(1, memberColumns.canonicalName).getValue() !== CONFIG.sheetHeaders.canonicalName) {
       throw new Error('Canonical Name header missing from Ministry Members');
+    }
+    if (dbSheet.getRange(1, memberColumns.dates).getValue() !== CONFIG.sheetHeaders.dates) {
+      throw new Error('Unavailable Dates header missing from Ministry Members');
+    }
+    if (dbSheet.getRange(1, memberColumns.times).getValue() !== CONFIG.sheetHeaders.times) {
+      throw new Error('Times Willing to Serve header missing from Ministry Members');
+    }
+    if (dbSheet.getRange(1, memberColumns.roles).getValue() !== CONFIG.sheetHeaders.roles) {
+      throw new Error('Roles header missing from Ministry Members');
     }
     if (dbSheet.getRange(1, getRoleCheckboxStartColumn()).getValue() !== runtimeSettings.roles[0]) {
       throw new Error('Role checkbox headers were not created in Ministry Members');
     }
-    if (!dbSheet.getRange(2, 2).getFormula()) {
+    if (!dbSheet.getRange(2, memberColumns.roles).getFormula()) {
       throw new Error('Roles formula was not created in Ministry Members');
     }
     if (settingsValues.indexOf('events_archive_frequency') === -1) {
@@ -667,7 +677,6 @@ function getDefaultSettingsSheetRows() {
     ['admin_reminder_enabled', CONFIG.defaults.adminReminderEnabled, 'TRUE or FALSE. When TRUE, send planning reminders to admins.'],
     ['admin_reminder_day', CONFIG.defaults.adminReminderDay, 'Day of month to send the admin planning reminder for next month.'],
     ['times_choices', CONFIG.defaults.timesChoices.join(','), 'Choices shown in the form question for how many times someone is willing to serve this month.'],
-    ['availability_sheet_suffix', CONFIG.defaults.availabilitySheetSuffix, 'Suffix used for monthly availability tabs'],
     ['events_archive_frequency', CONFIG.defaults.eventsArchiveFrequency, 'Off, Monthly, Quarterly, or Yearly. Cleanup runs automatically on the first day of the new period.'],
     ['forms_folder_id', CONFIG.ids.formsFolder, 'Only change this if you want new monthly forms to be stored in a different Drive folder.']
   ];
@@ -685,10 +694,10 @@ function getDefaultAdminsSheetRows() {
 function getDefaultRolesSheetRows() {
   return [
     ['Enabled', 'Role', 'Notes'],
+    [false, 'MEDIA', 'Example role. Check Enabled if your church needs it.'],
     [true, 'WL', 'Worship leader'],
     [true, 'SINGER', 'Vocals'],
-    [true, 'DRUMS', 'Drum kit'],
-    [false, 'MEDIA', 'Disabled example role']
+    [true, 'DRUMS', 'Drum kit']
   ];
 }
 
