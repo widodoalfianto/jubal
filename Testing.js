@@ -15,6 +15,7 @@ function runFullSystemTest() {
   console.log("\n--- Step 1: Initial Setup ---");
   // Ensure the project is initialized (creates sheets if missing)
   initializeProject();
+  migrateMemberRolesToCheckboxes();
   
   // Verify sheets exist
   if (!ss.getSheetByName(CONFIG.sheetNames.ministryMembers)) throw new Error("Ministry Members sheet missing");
@@ -96,10 +97,19 @@ function runFullSystemTest() {
   
   if (userRowIndex === -1) throw new Error("Test user was not added to the database");
   
-  // Set the role
-  dbSheet.getRange(userRowIndex, 2).setValue(testRole);
-  SpreadsheetApp.flush(); // Ensure the role is saved before the script reads it again
-  console.log(`✅ Form submission processed. Assigned role '${testRole}' to '${testName}'.`);
+  const roleHeaders = dbSheet.getRange(1, 1, 1, dbSheet.getLastColumn()).getDisplayValues()[0];
+  const roleColumnIndex = roleHeaders.indexOf(testRole) + 1;
+  if (roleColumnIndex <= 0) throw new Error(`Role checkbox column for '${testRole}' not found`);
+
+  dbSheet.getRange(userRowIndex, roleColumnIndex).setValue(true);
+  SpreadsheetApp.flush(); // Ensure the checkbox and derived Roles formula are saved before the script reads again
+
+  const derivedRoles = dbSheet.getRange(userRowIndex, 2).getDisplayValue();
+  if (derivedRoles.indexOf(testRole) === -1) {
+    throw new Error(`Derived Roles column did not include '${testRole}'. Found '${derivedRoles}'`);
+  }
+
+  console.log(`✅ Form submission processed. Checked role '${testRole}' for '${testName}'.`);
 
   // --- Step 4: Verify Availability ---
   console.log("\n--- Step 4: Verifying Availability Matrix ---");
@@ -459,6 +469,19 @@ function runIntegrationTests() {
     }
     recordResult('initializeProject:configSheets', true, 'Configuration sheets created');
   } catch (e) { recordResult('initializeProject:configSheets', false, e.message); }
+
+  try {
+    const dbSheet = ss.getSheetByName(CONFIG.sheetNames.ministryMembers);
+    const runtimeSettings = loadRuntimeSettings();
+    const result = migrateMemberRolesToCheckboxes();
+    if (dbSheet.getRange(1, getRoleCheckboxStartColumn()).getValue() !== runtimeSettings.roles[0]) {
+      throw new Error('Role checkbox headers were not created in Ministry Members');
+    }
+    if (!dbSheet.getRange(2, 2).getFormula()) {
+      throw new Error('Roles formula was not created in Ministry Members');
+    }
+    recordResult('migrateMemberRolesToCheckboxes:smoke', true, JSON.stringify(result));
+  } catch (e) { recordResult('migrateMemberRolesToCheckboxes:smoke', false, e.message); }
 
   // test: ensureMonthlyEventsFor remains usable for legacy installs
   try {

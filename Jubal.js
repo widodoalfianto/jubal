@@ -1054,14 +1054,11 @@ function sendReconciliationAlert(sheet, rowIndex) {
  * - trims, collapses spaces, removes diacritics, and lowercases
  */
 function normalizeName(name) {
-  if (!name) return '';
+  if (!name) return "";
   try {
-    const s = name.toString().trim().replace(/\s+/g, ' ');
-    // Remove diacritics
-    const noDiacritics = s.normalize ? s.normalize('NFD').replace(/[ -]|[^\u0000-\u007F]/g, function(ch) { return ch; }) : s;
-    // Proper diacritics removal using NFD range
-    const cleaned = noDiacritics.replace(/[\u0300-\u036f]/g, '');
-    return cleaned.toLowerCase();
+    const s = name.toString().trim().replace(/\s+/g, " ");
+    const normalized = s.normalize ? s.normalize("NFD") : s;
+    return normalized.replace(/[\u0300-\u036f]/g, "").toLowerCase();
   } catch (e) {
     return name.toString().toLowerCase();
   }
@@ -1162,6 +1159,7 @@ function updateDatabase(e) {
         databaseSheet.getRange(lastRow, 4).setValue(unavailableDatesString);
         databaseSheet.getRange(lastRow, 5).setValue(comments);
         databaseSheet.getRange(lastRow, 6).setValue(incomingCanonical);
+        ensureRolesFormulaForRow(databaseSheet, lastRow, loadRuntimeSettings().roles);
         console.log('Added new row ' + lastRow + ' for ' + name + ' (canonical: ' + incomingCanonical + ')');
 
         // Record reconciliation entry for admin review since this submission didn't match an existing member
@@ -1583,6 +1581,203 @@ function configureEventsSheetUi(sheet) {
   sheet.autoResizeColumns(1, Math.min(8, sheet.getLastColumn()));
 }
 
+function columnToLetter(columnNumber) {
+  let column = columnNumber;
+  let letter = '';
+  while (column > 0) {
+    const temp = (column - 1) % 26;
+    letter = String.fromCharCode(temp + 65) + letter;
+    column = Math.floor((column - temp - 1) / 26);
+  }
+  return letter;
+}
+
+function getRoleCheckboxStartColumn() {
+  return 7; // A-F are core member fields, role checkboxes begin in column G.
+}
+
+function ensureRoleCheckboxColumns(sheet, roles) {
+  if (!sheet || !roles || !roles.length) return;
+
+  const startColumn = getRoleCheckboxStartColumn();
+  const requiredLastColumn = startColumn + roles.length - 1;
+  if (sheet.getMaxColumns() < requiredLastColumn) {
+    sheet.insertColumnsAfter(sheet.getMaxColumns(), requiredLastColumn - sheet.getMaxColumns());
+  }
+
+  sheet.getRange(1, startColumn, 1, roles.length).setValues([roles]);
+  sheet.getRange(1, startColumn, 1, roles.length).setFontWeight('bold');
+  if (sheet.getMaxRows() > 1) {
+    sheet.getRange(2, startColumn, sheet.getMaxRows() - 1, roles.length).insertCheckboxes();
+  }
+  sheet.autoResizeColumns(startColumn, roles.length);
+}
+
+function syncRoleCheckboxesFromRolesColumn(sheet, roles) {
+  if (!sheet || !roles || !roles.length || sheet.getLastRow() < 2) return;
+
+  const startColumn = getRoleCheckboxStartColumn();
+  const lastRow = sheet.getLastRow();
+  const rolesText = sheet.getRange(2, 2, lastRow - 1, 1).getDisplayValues().flat();
+  const checkboxRange = sheet.getRange(2, startColumn, lastRow - 1, roles.length);
+  const checkboxValues = checkboxRange.getValues();
+
+  for (let i = 0; i < checkboxValues.length; i++) {
+    const existingChecks = checkboxValues[i];
+    const hasAnyChecked = existingChecks.some(value => value === true);
+    if (hasAnyChecked) continue;
+
+    const parsedRoles = String(rolesText[i] || '')
+      .split(',')
+      .map(role => role.trim().toUpperCase())
+      .filter(Boolean);
+    if (!parsedRoles.length) continue;
+
+    checkboxValues[i] = roles.map(role => parsedRoles.indexOf(String(role).trim().toUpperCase()) !== -1);
+  }
+
+  checkboxRange.setValues(checkboxValues);
+}
+
+function ensureRolesFormulaColumn(sheet, roles) {
+  if (!sheet || !roles || !roles.length) return;
+
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return;
+
+  const startColumn = getRoleCheckboxStartColumn();
+  const endColumn = startColumn + roles.length - 1;
+  const headerRange = `${columnToLetter(startColumn)}$1:${columnToLetter(endColumn)}$1`;
+
+  const formulas = [];
+  for (let row = 2; row <= lastRow; row++) {
+    const rowRange = `${columnToLetter(startColumn)}${row}:${columnToLetter(endColumn)}${row}`;
+    formulas.push([
+      `=IF(COUNTIF(${rowRange},TRUE)=0,"",TEXTJOIN(", ",TRUE,FILTER(${headerRange},${rowRange}=TRUE)))`
+    ]);
+  }
+
+  sheet.getRange(2, 2, formulas.length, 1).setFormulas(formulas);
+}
+
+function configureMinistryMembersRoles(sheet, roles) {
+  if (!sheet || !roles || !roles.length) return;
+  ensureRoleCheckboxColumns(sheet, roles);
+  syncRoleCheckboxesFromRolesColumn(sheet, roles);
+  ensureRolesFormulaColumn(sheet, roles);
+}
+
+function hasRoleCheckboxColumnsConfigured(sheet, roles) {
+  if (!sheet || !roles || !roles.length) return false;
+
+  const startColumn = getRoleCheckboxStartColumn();
+  const requiredLastColumn = startColumn + roles.length - 1;
+  if (sheet.getLastColumn() < requiredLastColumn) return false;
+
+  const headers = sheet.getRange(1, startColumn, 1, roles.length).getDisplayValues()[0];
+  return roles.every((role, index) => String(headers[index] || '').trim() === String(role || '').trim());
+}
+
+function ensureRolesFormulaForRow(sheet, rowNumber, roles) {
+  if (!sheet || !roles || !roles.length || rowNumber < 2) return;
+  if (!hasRoleCheckboxColumnsConfigured(sheet, roles)) return;
+
+  const startColumn = getRoleCheckboxStartColumn();
+  const endColumn = startColumn + roles.length - 1;
+  const headerRange = `${columnToLetter(startColumn)}$1:${columnToLetter(endColumn)}$1`;
+  const rowRange = `${columnToLetter(startColumn)}${rowNumber}:${columnToLetter(endColumn)}${rowNumber}`;
+  const formula = `=IF(COUNTIF(${rowRange},TRUE)=0,"",TEXTJOIN(", ",TRUE,FILTER(${headerRange},${rowRange}=TRUE)))`;
+  sheet.getRange(rowNumber, 2).setFormula(formula);
+}
+
+function summarizeRoleMigration(sheet, roles) {
+  const summary = {
+    roleCount: roles.length,
+    memberRows: 0,
+    rowsWithLegacyRoles: 0,
+    conflictingCells: 0,
+    conflictSamples: []
+  };
+
+  if (!sheet || sheet.getLastRow() < 2 || !roles.length) return summary;
+
+  const lastRow = sheet.getLastRow();
+  const startColumn = getRoleCheckboxStartColumn();
+  const requiredLastColumn = startColumn + roles.length - 1;
+  summary.memberRows = lastRow - 1;
+
+  const rolesText = sheet.getRange(2, 2, lastRow - 1, 1).getDisplayValues().flat();
+  summary.rowsWithLegacyRoles = rolesText.filter(value => String(value || '').trim()).length;
+
+  if (sheet.getLastColumn() >= startColumn) {
+    const inspectWidth = Math.max(0, Math.min(requiredLastColumn, sheet.getLastColumn()) - startColumn + 1);
+    if (inspectWidth > 0) {
+      const existing = sheet.getRange(1, startColumn, lastRow, inspectWidth).getDisplayValues();
+      for (let r = 0; r < existing.length; r++) {
+        for (let c = 0; c < existing[r].length; c++) {
+          const value = String(existing[r][c] || '').trim();
+          if (!value) continue;
+          if (r === 0 && value === String(roles[c] || '').trim()) continue;
+          summary.conflictingCells++;
+          if (summary.conflictSamples.length < 5) {
+            summary.conflictSamples.push(`${columnToLetter(startColumn + c)}${r + 1}=${value}`);
+          }
+        }
+      }
+    }
+  }
+
+  return summary;
+}
+
+function migrateMemberRolesToCheckboxes() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(CONFIG.sheetNames.ministryMembers);
+  if (!sheet) throw new Error('Ministry Members sheet not found.');
+
+  const roles = loadRuntimeSettings().roles;
+  if (!roles.length) throw new Error('No roles configured in Settings.');
+
+  const summary = summarizeRoleMigration(sheet, roles);
+  if (summary.conflictingCells > 0) {
+    throw new Error(
+      `Role checkbox migration stopped because columns ${columnToLetter(getRoleCheckboxStartColumn())}+ already contain data. ` +
+      `Conflicts found: ${summary.conflictingCells}. Examples: ${summary.conflictSamples.join(', ')}`
+    );
+  }
+
+  configureMinistryMembersRoles(sheet, roles);
+  SpreadsheetApp.flush();
+
+  console.log(
+    `Role migration complete. Added ${roles.length} checkbox columns starting at ${columnToLetter(getRoleCheckboxStartColumn())}. ` +
+    `Migrated ${summary.rowsWithLegacyRoles} member row(s) from the Roles column.`
+  );
+
+  return {
+    status: 'ok',
+    roles: roles,
+    startColumn: columnToLetter(getRoleCheckboxStartColumn()),
+    migratedRows: summary.rowsWithLegacyRoles,
+    memberRows: summary.memberRows
+  };
+}
+
+function getMemberRolesFromRow(row, configuredRoles) {
+  const roles = (configuredRoles || []).map(role => String(role || '').trim()).filter(Boolean);
+  if (!row || !roles.length) return [];
+
+  const checkboxStartIndex = getRoleCheckboxStartColumn() - 1;
+  const checkboxRoles = roles.filter((role, index) => row[checkboxStartIndex + index] === true);
+  if (checkboxRoles.length) {
+    return checkboxRoles.map(role => role.toUpperCase());
+  }
+
+  return row[1]
+    ? row[1].toString().split(",").map(role => role.trim().toUpperCase()).filter(Boolean)
+    : [];
+}
+
 function setupAvailability(sheetName, year, month) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const runtimeSettings = loadRuntimeSettings();
@@ -1847,11 +2042,7 @@ function updateAvailability() {
       console.error('Failed to persist canonical in updateAvailability for row ' + (i + 1) + ': ' + err.message);
     }
     
-    const roles = row[1]
-      ? row[1].toString().split(",").map(role => {
-          return role.trim().toUpperCase();
-        })
-      : [];
+    const roles = getMemberRolesFromRow(row, runtimeSettings.roles);
     const timesWilling = row[2] ? row[2].toString().trim() : "";
     const rawUnavailableDates = row[3] ? row[3].toString() : "";
     
