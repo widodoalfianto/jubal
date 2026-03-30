@@ -123,13 +123,13 @@ jobs:
             echo "CLASPRC_JSON secret is not set.";
             exit 1;
           fi
-          printf '%s' "${CLASPRC_JSON}" > "$HOME/.clasprc.json"
+          printf '%s' "${CLASPRC_JSON}" > "$RUNNER_TEMP/.clasprc.json"
 
       - name: Validate clasp auth credentials
         run: |
           node -e '
             const fs = require("fs");
-            const path = process.env.HOME + "/.clasprc.json";
+            const path = process.env.RUNNER_TEMP + "/.clasprc.json";
             const fail = (message) => { console.error(message); process.exit(1); };
             let data;
             try {
@@ -149,17 +149,20 @@ jobs:
             console.log("Validated ~/.clasprc.json structure for clasp.");
           '
 
+      - name: Check clasp authorized user
+        run: clasp --auth "$RUNNER_TEMP/.clasprc.json" show-authorized-user --json
+
       - name: Push project to Apps Script
-        run: clasp push --force
+        run: clasp --auth "$RUNNER_TEMP/.clasprc.json" push --force
 
       - name: Create deployment version (best-effort)
         env:
           TENANT_NAME: ${{ matrix.name }}
-        run: clasp deploy -v "GitHub Actions deploy (${TENANT_NAME})" || echo "clasp deploy failed; files were still pushed."
+        run: clasp --auth "$RUNNER_TEMP/.clasprc.json" deploy -v "GitHub Actions deploy (${TENANT_NAME})" || echo "clasp deploy failed; files were still pushed."
 
       - name: Cleanup credentials
         run: |
-          shred -u "$HOME/.clasprc.json" || rm -f "$HOME/.clasprc.json" || true
+          shred -u "$RUNNER_TEMP/.clasprc.json" || rm -f "$RUNNER_TEMP/.clasprc.json" || true
           rm -f .clasp.json || true
 
   test-dev:
@@ -253,13 +256,13 @@ jobs:
             echo "CLASPRC_JSON secret is not set.";
             exit 1;
           fi
-          printf '%s' "${CLASPRC_JSON}" > "$HOME/.clasprc.json"
+          printf '%s' "${CLASPRC_JSON}" > "$RUNNER_TEMP/.clasprc.json"
 
       - name: Validate clasp auth credentials
         run: |
           node -e '
             const fs = require("fs");
-            const path = process.env.HOME + "/.clasprc.json";
+            const path = process.env.RUNNER_TEMP + "/.clasprc.json";
             const fail = (message) => { console.error(message); process.exit(1); };
             let data;
             try {
@@ -279,17 +282,20 @@ jobs:
             console.log("Validated ~/.clasprc.json structure for clasp.");
           '
 
+      - name: Check clasp authorized user
+        run: clasp --auth "$RUNNER_TEMP/.clasprc.json" show-authorized-user --json
+
       - name: Push project to Apps Script
-        run: clasp push --force
+        run: clasp --auth "$RUNNER_TEMP/.clasprc.json" push --force
 
       - name: Create deployment version (best-effort)
         env:
           TENANT_NAME: ${{ matrix.name }}
-        run: clasp deploy -v "GitHub Actions deploy (${TENANT_NAME})" || echo "clasp deploy failed; files were still pushed."
+        run: clasp --auth "$RUNNER_TEMP/.clasprc.json" deploy -v "GitHub Actions deploy (${TENANT_NAME})" || echo "clasp deploy failed; files were still pushed."
 
       - name: Cleanup credentials
         run: |
-          shred -u "$HOME/.clasprc.json" || rm -f "$HOME/.clasprc.json" || true
+          shred -u "$RUNNER_TEMP/.clasprc.json" || rm -f "$RUNNER_TEMP/.clasprc.json" || true
           rm -f .clasp.json || true
 
 # Tenant registry notes:
