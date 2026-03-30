@@ -52,7 +52,7 @@ Update the `CONFIG` object with your specific details:
 5. If `initializeProject()` skips that migration because columns `G+` already contain data, you can review the sheet and run `migrateMemberRolesToCheckboxes()` manually.
 6. Use the `Admins` sheet to add or remove notification recipients with checkboxes and email validation.
 7. Use the `Roles` sheet to add or disable ministry roles. The system uses that sheet to build the role checkboxes in `Ministry Members`.
-8. `Ministry Members` is ordered for daily admin use: `Name`, `Unavailable Dates`, `Times Willing To Serve`, `Comments`, `Roles`, `Canonical Name`, then role checkboxes.
+8. `Ministry Members` is ordered for daily admin use: `Name`, `Unavailable Dates`, `Times Willing To Serve`, `Comments`, `Roles`, then role checkboxes, with `Canonical Name` kept as the last column.
 
 ### 4. Triggers
 Set up the automation triggers in the Apps Script dashboard (Clock icon on the left):

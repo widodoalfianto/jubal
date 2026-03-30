@@ -103,7 +103,7 @@ function runFullSystemTest() {
   dbSheet.getRange(userRowIndex, roleColumnIndex).setValue(true);
   SpreadsheetApp.flush(); // Ensure the checkbox and derived Roles formula are saved before the script reads again
 
-  const derivedRoles = dbSheet.getRange(userRowIndex, getMinistryMembersColumnMap().roles).getDisplayValue();
+  const derivedRoles = dbSheet.getRange(userRowIndex, getMinistryMembersColumnMap(dbSheet).roles).getDisplayValue();
   if (derivedRoles.indexOf(testRole) === -1) {
     throw new Error(`Derived Roles column did not include '${testRole}'. Found '${derivedRoles}'`);
   }
@@ -538,7 +538,7 @@ function runIntegrationTests() {
     initializeProject();
     const dbSheet = ss.getSheetByName(CONFIG.sheetNames.ministryMembers);
     const runtimeSettings = loadRuntimeSettings();
-    const memberColumns = getMinistryMembersColumnMap();
+    const memberColumns = getMinistryMembersColumnMap(dbSheet);
     const settingsSheet = ss.getSheetByName(CONFIG.sheetNames.settings);
     const adminsSheet = ss.getSheetByName(CONFIG.sheetNames.admins);
     const rolesSheet = ss.getSheetByName(CONFIG.sheetNames.rolesConfig);
@@ -564,7 +564,7 @@ function runIntegrationTests() {
     if (dbSheet.getRange(1, memberColumns.roles).getValue() !== CONFIG.sheetHeaders.roles) {
       throw new Error('Roles header missing from Ministry Members');
     }
-    if (dbSheet.getRange(1, getRoleCheckboxStartColumn()).getValue() !== runtimeSettings.roles[0]) {
+    if (dbSheet.getRange(1, getRoleCheckboxStartColumn(dbSheet)).getValue() !== runtimeSettings.roles[0]) {
       throw new Error('Role checkbox headers were not created in Ministry Members');
     }
     if (!dbSheet.getRange(2, memberColumns.roles).getFormula()) {
@@ -687,14 +687,14 @@ function getDefaultAdminsSheetRows() {
     ['Enabled', 'Name', 'Email', 'Notes'],
     [true, 'Primary Admin', 'admin1@example.com', 'Main admin'],
     [true, 'Backup Admin', 'admin2@example.com', 'Also receives alerts'],
-    [false, 'Example Admin', 'ignore@example.com', 'Disabled example row']
+    [false, 'Example Admin', 'ignore@example.com', 'Example row']
   ];
 }
 
 function getDefaultRolesSheetRows() {
   return [
     ['Enabled', 'Role', 'Notes'],
-    [false, 'MEDIA', 'Example role. Check Enabled if your church needs it.'],
+    [false, 'MEDIA', 'Example row'],
     [true, 'WL', 'Worship leader'],
     [true, 'SINGER', 'Vocals'],
     [true, 'DRUMS', 'Drum kit']

@@ -511,15 +511,37 @@ function getDayOfMonthDropdownValues() {
   return values;
 }
 
-function getMinistryMembersColumnMap() {
-  return {
+function getMinistryMembersColumnMap(sheet) {
+  const defaults = {
     name: 1,
     dates: 2,
     times: 3,
     comments: 4,
     roles: 5,
     canonicalName: 6,
-    firstRoleCheckbox: 7
+    firstRoleCheckbox: 6
+  };
+
+  if (!sheet || sheet.getLastColumn() < 1) return defaults;
+
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getDisplayValues()[0];
+  const headerMap = buildHeaderMap(headers);
+  const getColumn = (header, fallback) => {
+    const key = String(header || '').trim().toLowerCase();
+    return Object.prototype.hasOwnProperty.call(headerMap, key) ? headerMap[key] + 1 : fallback;
+  };
+
+  const rolesColumn = getColumn(CONFIG.sheetHeaders.roles, defaults.roles);
+  const canonicalColumn = getColumn(CONFIG.sheetHeaders.canonicalName, Math.max(sheet.getLastColumn(), defaults.canonicalName));
+
+  return {
+    name: getColumn(CONFIG.sheetHeaders.name, defaults.name),
+    dates: getColumn(CONFIG.sheetHeaders.dates, defaults.dates),
+    times: getColumn(CONFIG.sheetHeaders.times, defaults.times),
+    comments: getColumn(CONFIG.sheetHeaders.comments, defaults.comments),
+    roles: rolesColumn,
+    canonicalName: canonicalColumn,
+    firstRoleCheckbox: rolesColumn + 1
   };
 }
 
@@ -534,7 +556,7 @@ function applyTableBorder(sheet, startRow, startColumn, numRows, numColumns) {
   if (!sheet || numRows <= 0 || numColumns <= 0) return;
   sheet
     .getRange(startRow, startColumn, numRows, numColumns)
-    .setBorder(true, true, true, true, true, true, '#d9d9d9', SpreadsheetApp.BorderStyle.SOLID);
+    .setBorder(true, true, true, true, true, true, '#666666', SpreadsheetApp.BorderStyle.SOLID);
 }
 
 function applyTableBordersToDataRange(sheet) {
@@ -1527,7 +1549,7 @@ function updateDatabase(e) {
     const databaseSS = SpreadsheetApp.getActiveSpreadsheet();
     const databaseSheet = databaseSS.getSheetByName(CONFIG.sheetNames.ministryMembers);
     const databaseData = databaseSheet.getDataRange().getValues();
-    const memberColumns = getMinistryMembersColumnMap();
+    const memberColumns = getMinistryMembersColumnMap(databaseSheet);
 
     console.log('--- STARTING UPDATE DATABASE ---');
     console.log(`Event Data: ${JSON.stringify(e)}`);
@@ -1599,7 +1621,7 @@ function updateDatabase(e) {
       }
 
       if (!found) {
-        // If no match is found, append a new row with canonical name in column 6
+        // If no match is found, append a new row with the canonical name in its configured column
         const lastRow = databaseSheet.getLastRow() + 1;
         databaseSheet.getRange(lastRow, memberColumns.name).setValue(name);
         databaseSheet.getRange(lastRow, memberColumns.times).setValue(timesWilling);
@@ -2219,7 +2241,7 @@ function getAdminsSeedRows(emails) {
     rows.push([true, 'Primary Admin', '', 'Enter the first admin email here.']);
   }
 
-  rows.push([false, '', '', 'Example extra admin row. Check Enabled when ready to use it.']);
+  rows.push([false, 'Example Admin', 'admin@example.com', 'Example row']);
   return rows;
 }
 
@@ -2236,6 +2258,7 @@ function configureAdminsSheetUi(sheet) {
   applyCheckboxColumn(sheet, 1, maxRows);
   applyEmailColumn(sheet, 3, maxRows);
   applySheetTheme(sheet);
+  highlightExampleRows(sheet, 4);
   fitSheetToContent(sheet);
   applyTableBordersToDataRange(sheet);
 }
@@ -2244,7 +2267,7 @@ function getRolesSeedRows(roles) {
   const configuredRoles = normalizeRoleList(roles && roles.length ? roles : CONFIG.roles);
   const rows = [
     ['Enabled', 'Role', 'Notes'],
-    [false, 'MEDIA', 'Example role. Check Enabled if your church needs it.']
+    [false, 'MEDIA', 'Example row']
   ];
 
   configuredRoles.forEach(role => {
@@ -2587,8 +2610,8 @@ function columnToLetter(columnNumber) {
   return letter;
 }
 
-function getRoleCheckboxStartColumn() {
-  return getMinistryMembersColumnMap().firstRoleCheckbox;
+function getRoleCheckboxStartColumn(sheet) {
+  return getMinistryMembersColumnMap(sheet).firstRoleCheckbox;
 }
 
 function getMinistryMembersHeaderRow() {
@@ -2597,18 +2620,17 @@ function getMinistryMembersHeaderRow() {
     CONFIG.sheetHeaders.dates,
     CONFIG.sheetHeaders.times,
     CONFIG.sheetHeaders.comments,
-    CONFIG.sheetHeaders.roles,
-    CONFIG.sheetHeaders.canonicalName
+    CONFIG.sheetHeaders.roles
   ];
 }
 
 function ensureMinistryMembersLayout(sheet) {
   if (!sheet) return;
 
-  const desiredHeaders = getMinistryMembersHeaderRow();
-  const desiredWidth = desiredHeaders.length;
+  const baseHeaders = getMinistryMembersHeaderRow();
+  const canonicalHeader = CONFIG.sheetHeaders.canonicalName;
   const lastRow = Math.max(sheet.getLastRow(), 1);
-  const lastColumn = Math.max(sheet.getLastColumn(), desiredWidth);
+  const lastColumn = Math.max(sheet.getLastColumn(), baseHeaders.length + 1);
 
   if (sheet.getMaxColumns() < lastColumn) {
     sheet.insertColumnsAfter(sheet.getMaxColumns(), lastColumn - sheet.getMaxColumns());
@@ -2616,6 +2638,12 @@ function ensureMinistryMembersLayout(sheet) {
 
   const existingHeaders = sheet.getRange(1, 1, 1, lastColumn).getDisplayValues()[0];
   const headerMap = buildHeaderMap(existingHeaders);
+  const knownHeaders = baseHeaders.concat([canonicalHeader]).map(header => String(header || '').trim().toLowerCase());
+  const extraHeaders = existingHeaders
+    .map(header => String(header || '').trim())
+    .filter(header => header && knownHeaders.indexOf(header.toLowerCase()) === -1);
+  const desiredHeaders = baseHeaders.concat(extraHeaders).concat([canonicalHeader]);
+  const desiredWidth = desiredHeaders.length;
   const output = [desiredHeaders];
 
   if (lastRow > 1) {
@@ -2635,10 +2663,12 @@ function ensureMinistryMembersLayout(sheet) {
 
 function getConfiguredMemberRoleColumnMap(sheet) {
   const map = {};
-  if (!sheet || sheet.getLastColumn() < getRoleCheckboxStartColumn()) return map;
+  if (!sheet) return map;
 
-  const startColumn = getRoleCheckboxStartColumn();
-  const width = sheet.getLastColumn() - startColumn + 1;
+  const memberColumns = getMinistryMembersColumnMap(sheet);
+  const startColumn = getRoleCheckboxStartColumn(sheet);
+  const endColumn = Math.min(sheet.getLastColumn(), memberColumns.canonicalName - 1);
+  const width = endColumn - startColumn + 1;
   if (width <= 0) return map;
 
   const headers = sheet.getRange(1, startColumn, 1, width).getDisplayValues()[0];
@@ -2657,25 +2687,34 @@ function hasAnyRoleCheckboxHeaders(sheet) {
 function ensureRoleCheckboxColumns(sheet, roles) {
   if (!sheet || !roles || !roles.length) return;
 
-  const startColumn = getRoleCheckboxStartColumn();
+  const startColumn = getRoleCheckboxStartColumn(sheet);
   const roleColumnMap = getConfiguredMemberRoleColumnMap(sheet);
-  const usedColumns = Object.keys(roleColumnMap).map(key => roleColumnMap[key]);
-  let nextColumn = usedColumns.length ? Math.max.apply(null, usedColumns) + 1 : startColumn;
+  let memberColumns = getMinistryMembersColumnMap(sheet);
 
   roles.forEach(role => {
     const normalized = String(role || '').trim().toUpperCase();
     if (!normalized || roleColumnMap[normalized]) return;
 
-    if (sheet.getMaxColumns() < nextColumn) {
-      sheet.insertColumnsAfter(sheet.getMaxColumns(), nextColumn - sheet.getMaxColumns());
+    memberColumns = getMinistryMembersColumnMap(sheet);
+    const canonicalColumn = memberColumns.canonicalName;
+    let targetColumn = canonicalColumn;
+
+    if (canonicalColumn >= 1 && canonicalColumn <= sheet.getMaxColumns()) {
+      sheet.insertColumnsBefore(canonicalColumn, 1);
+      targetColumn = canonicalColumn;
+    } else {
+      const nextColumn = Math.max(sheet.getLastColumn() + 1, startColumn);
+      if (sheet.getMaxColumns() < nextColumn) {
+        sheet.insertColumnsAfter(sheet.getMaxColumns(), nextColumn - sheet.getMaxColumns());
+      }
+      targetColumn = nextColumn;
     }
 
-    sheet.getRange(1, nextColumn).setValue(role).setFontWeight('bold');
+    sheet.getRange(1, targetColumn).setValue(role).setFontWeight('bold');
     if (sheet.getMaxRows() > 1) {
-      sheet.getRange(2, nextColumn, sheet.getMaxRows() - 1, 1).insertCheckboxes();
+      sheet.getRange(2, targetColumn, sheet.getMaxRows() - 1, 1).insertCheckboxes();
     }
-    roleColumnMap[normalized] = nextColumn;
-    nextColumn++;
+    roleColumnMap[normalized] = targetColumn;
   });
 
   const finalRoleColumnMap = getConfiguredMemberRoleColumnMap(sheet);
@@ -2692,7 +2731,7 @@ function syncRoleCheckboxesFromRolesColumn(sheet, roles) {
 
   const roleColumnMap = getConfiguredMemberRoleColumnMap(sheet);
   const lastRow = sheet.getLastRow();
-  const memberColumns = getMinistryMembersColumnMap();
+  const memberColumns = getMinistryMembersColumnMap(sheet);
   const rolesText = sheet.getRange(2, memberColumns.roles, lastRow - 1, 1).getDisplayValues().flat();
   const activeRoleColumns = roles
     .map(role => roleColumnMap[String(role || '').trim().toUpperCase()])
@@ -2741,7 +2780,7 @@ function ensureRolesFormulaColumn(sheet, roles) {
     ]);
   }
 
-  sheet.getRange(2, getMinistryMembersColumnMap().roles, formulas.length, 1).setFormulas(formulas);
+  sheet.getRange(2, getMinistryMembersColumnMap(sheet).roles, formulas.length, 1).setFormulas(formulas);
 }
 
 function configureMinistryMembersRoles(sheet, roles) {
@@ -2773,7 +2812,7 @@ function ensureRolesFormulaForRow(sheet, rowNumber, roles) {
   const headerRefs = roleColumns.map(column => `${columnToLetter(column)}$1`);
   const rowRefs = roleColumns.map(column => `${columnToLetter(column)}${rowNumber}`);
   const formula = `=IF(COUNTIF({${rowRefs.join(',')}},TRUE)=0,"",TEXTJOIN(", ",TRUE,FILTER({${headerRefs.join(',')}},{${rowRefs.join(',')}}=TRUE)))`;
-  sheet.getRange(rowNumber, getMinistryMembersColumnMap().roles).setFormula(formula);
+  sheet.getRange(rowNumber, getMinistryMembersColumnMap(sheet).roles).setFormula(formula);
 }
 
 function summarizeRoleMigration(sheet, roles) {
@@ -2788,15 +2827,16 @@ function summarizeRoleMigration(sheet, roles) {
   if (!sheet || sheet.getLastRow() < 2 || !roles.length) return summary;
 
   const lastRow = sheet.getLastRow();
-  const startColumn = getRoleCheckboxStartColumn();
+  const memberColumns = getMinistryMembersColumnMap(sheet);
+  const startColumn = getRoleCheckboxStartColumn(sheet);
   const requiredLastColumn = startColumn + roles.length - 1;
   summary.memberRows = lastRow - 1;
 
-  const rolesText = sheet.getRange(2, getMinistryMembersColumnMap().roles, lastRow - 1, 1).getDisplayValues().flat();
+  const rolesText = sheet.getRange(2, memberColumns.roles, lastRow - 1, 1).getDisplayValues().flat();
   summary.rowsWithLegacyRoles = rolesText.filter(value => String(value || '').trim()).length;
 
   if (sheet.getLastColumn() >= startColumn) {
-    const inspectWidth = Math.max(0, Math.min(requiredLastColumn, sheet.getLastColumn()) - startColumn + 1);
+    const inspectWidth = Math.max(0, Math.min(requiredLastColumn, memberColumns.canonicalName - 1, sheet.getLastColumn()) - startColumn + 1);
     if (inspectWidth > 0) {
       const existing = sheet.getRange(1, startColumn, lastRow, inspectWidth).getDisplayValues();
       for (let r = 0; r < existing.length; r++) {
@@ -2832,7 +2872,7 @@ function migrateMemberRolesToCheckboxes() {
     return {
       status: 'already_configured',
       roles: roles,
-      startColumn: columnToLetter(getRoleCheckboxStartColumn()),
+      startColumn: columnToLetter(getRoleCheckboxStartColumn(sheet)),
       migratedRows: 0,
       memberRows: Math.max(sheet.getLastRow() - 1, 0)
     };
@@ -2845,7 +2885,7 @@ function migrateMemberRolesToCheckboxes() {
     return {
       status: 'updated_roles',
       roles: roles,
-      startColumn: columnToLetter(getRoleCheckboxStartColumn()),
+      startColumn: columnToLetter(getRoleCheckboxStartColumn(sheet)),
       migratedRows: 0,
       memberRows: Math.max(sheet.getLastRow() - 1, 0)
     };
@@ -2854,7 +2894,7 @@ function migrateMemberRolesToCheckboxes() {
   const summary = summarizeRoleMigration(sheet, roles);
   if (summary.conflictingCells > 0) {
     throw new Error(
-      `Role checkbox migration stopped because columns ${columnToLetter(getRoleCheckboxStartColumn())}+ already contain data. ` +
+      `Role checkbox migration stopped because columns ${columnToLetter(getRoleCheckboxStartColumn(sheet))}+ already contain data. ` +
       `Conflicts found: ${summary.conflictingCells}. Examples: ${summary.conflictSamples.join(', ')}`
     );
   }
@@ -2863,14 +2903,14 @@ function migrateMemberRolesToCheckboxes() {
   SpreadsheetApp.flush();
 
   console.log(
-    `Role migration complete. Added ${roles.length} checkbox columns starting at ${columnToLetter(getRoleCheckboxStartColumn())}. ` +
+    `Role migration complete. Added ${roles.length} checkbox columns starting at ${columnToLetter(getRoleCheckboxStartColumn(sheet))}. ` +
     `Migrated ${summary.rowsWithLegacyRoles} member row(s) from the Roles column.`
   );
 
   return {
     status: 'migrated',
     roles: roles,
-    startColumn: columnToLetter(getRoleCheckboxStartColumn()),
+    startColumn: columnToLetter(getRoleCheckboxStartColumn(sheet)),
     migratedRows: summary.rowsWithLegacyRoles,
     memberRows: summary.memberRows
   };
@@ -2902,9 +2942,10 @@ function syncConfiguredMemberRoles() {
   return result;
 }
 
-function getMemberRolesFromRow(row, configuredRoles, roleColumnMap) {
+function getMemberRolesFromRow(row, configuredRoles, roleColumnMap, memberColumns) {
   const roles = (configuredRoles || []).map(role => String(role || '').trim()).filter(Boolean);
   if (!row || !roles.length) return [];
+  const resolvedMemberColumns = memberColumns || getMinistryMembersColumnMap();
 
   const normalizedColumnMap = roleColumnMap || {};
   const checkboxRoles = roles.filter(role => {
@@ -2915,8 +2956,8 @@ function getMemberRolesFromRow(row, configuredRoles, roleColumnMap) {
     return checkboxRoles.map(role => role.toUpperCase());
   }
 
-  return row[getMinistryMembersColumnMap().roles - 1]
-    ? row[getMinistryMembersColumnMap().roles - 1].toString().split(",").map(role => role.trim().toUpperCase()).filter(Boolean)
+  return row[resolvedMemberColumns.roles - 1]
+    ? row[resolvedMemberColumns.roles - 1].toString().split(",").map(role => role.trim().toUpperCase()).filter(Boolean)
     : [];
 }
 
@@ -3165,8 +3206,6 @@ function updateAvailability() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   syncConfiguredMemberRoles();
   const runtimeSettings = loadRuntimeSettings();
-  const memberColumns = getMinistryMembersColumnMap();
-
   console.log('--- STARTING updateAvailability ---');
 
   const today = new Date();
@@ -3182,6 +3221,8 @@ function updateAvailability() {
     console.log("Error: One or more required sheets are missing.");
     return;
   }
+
+  const memberColumns = getMinistryMembersColumnMap(databaseSheet);
 
   const databaseData = databaseSheet.getDataRange().getValues();
 
@@ -3221,10 +3262,10 @@ function updateAvailability() {
   // Process each row in the Ministry Members sheet
   for (let i = 1; i < databaseData.length; i++) {
     const row = databaseData[i];
-    let name = row[0] ? row[0].trim() : "";
+    let name = row[memberColumns.name - 1] ? row[memberColumns.name - 1].trim() : "";
     if (!name) continue;
 
-    // Ensure canonical name exists in column 6
+    // Ensure canonical name exists in the canonical-name column
     try {
       const existingCanonical = row[memberColumns.canonicalName - 1] ? row[memberColumns.canonicalName - 1].toString() : '';
       if (!existingCanonical && name) {
@@ -3237,7 +3278,7 @@ function updateAvailability() {
       console.error('Failed to persist canonical in updateAvailability for row ' + (i + 1) + ': ' + err.message);
     }
     
-    const roles = getMemberRolesFromRow(row, runtimeSettings.roles, roleColumnMap);
+    const roles = getMemberRolesFromRow(row, runtimeSettings.roles, roleColumnMap, memberColumns);
     const timesWilling = row[memberColumns.times - 1] ? row[memberColumns.times - 1].toString().trim() : "";
     const rawUnavailableDates = row[memberColumns.dates - 1] ? row[memberColumns.dates - 1].toString() : "";
     
@@ -3312,7 +3353,7 @@ function initializeProject() {
   if (!dbSheet) {
     dbSheet = ss.insertSheet(CONFIG.sheetNames.ministryMembers);
     // Add Headers
-    const headers = getMinistryMembersHeaderRow();
+    const headers = getMinistryMembersHeaderRow().concat([CONFIG.sheetHeaders.canonicalName]);
     dbSheet.appendRow(headers);
     dbSheet.getRange(1, 1, 1, headers.length).setFontWeight("bold");
     
