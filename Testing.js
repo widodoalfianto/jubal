@@ -197,15 +197,27 @@ function cleanupTestArtifacts(ss, testName, createdSheetName, monthName) {
   }
 
   // 4. Delete the empty Form Responses sheet created by the test
-  const sheets = ss.getSheets();
-  for (const sheet of sheets) {
-    if (sheet.getName().startsWith("Form Responses") && sheet.getLastRow() <= 1) {
+  const responseSheetNames = ss.getSheets()
+    .map(sheet => {
       try {
-        ss.deleteSheet(sheet);
-        console.log(`✅ Deleted empty test sheet '${sheet.getName()}'.`);
+        return sheet.getName();
       } catch (e) {
-        console.log(`⚠️ Could not delete linked test sheet '${sheet.getName()}': ${e.message}`);
+        return '';
       }
+    })
+    .filter(name => name.startsWith("Form Responses"));
+
+  for (const sheetName of responseSheetNames) {
+    const sheet = ss.getSheetByName(sheetName);
+    if (!sheet) continue;
+
+    try {
+      if (sheet.getLastRow() <= 1) {
+        ss.deleteSheet(sheet);
+        console.log(`✅ Deleted empty test sheet '${sheetName}'.`);
+      }
+    } catch (e) {
+      console.log(`⚠️ Could not delete linked test sheet '${sheetName}': ${e.message}`);
     }
   }
 }
@@ -434,12 +446,16 @@ function runIntegrationTests() {
   // test: initializeProject seeds the new configuration sheets
   try {
     initializeProject();
+    const dbSheet = ss.getSheetByName(CONFIG.sheetNames.ministryMembers);
     if (!ss.getSheetByName(CONFIG.sheetNames.settings)) throw new Error('Settings sheet missing');
     if (!ss.getSheetByName(CONFIG.sheetNames.recurring) && !ss.getSheetByName(CONFIG.sheetNames.recurringEvents)) {
       throw new Error('Recurring sheet missing');
     }
     if (!ss.getSheetByName(CONFIG.sheetNames.events) && !ss.getSheetByName(CONFIG.sheetNames.monthlyEvents)) {
       throw new Error('Events sheet missing');
+    }
+    if (!dbSheet || dbSheet.getRange(1, 6).getValue() !== CONFIG.sheetHeaders.canonicalName) {
+      throw new Error('Canonical Name header missing from Ministry Members');
     }
     recordResult('initializeProject:configSheets', true, 'Configuration sheets created');
   } catch (e) { recordResult('initializeProject:configSheets', false, e.message); }

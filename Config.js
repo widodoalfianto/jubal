@@ -27,7 +27,8 @@ const CONFIG = {
     roles: 'Roles',
     times: 'Times Willing to Serve',
     dates: 'Unavailable Dates',
-    comments: 'Comments'
+    comments: 'Comments',
+    canonicalName: 'Canonical Name'
   },
   roles: ["WL", "SINGER", "ACOUSTIC", "KEYBOARD", "EG", "BASS", "DRUMS"],
   defaults: {

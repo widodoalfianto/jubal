@@ -1931,16 +1931,23 @@ function initializeProject() {
       CONFIG.sheetHeaders.roles, 
       CONFIG.sheetHeaders.times, 
       CONFIG.sheetHeaders.dates, 
-      CONFIG.sheetHeaders.comments
+      CONFIG.sheetHeaders.comments,
+      CONFIG.sheetHeaders.canonicalName
     ];
     dbSheet.appendRow(headers);
     dbSheet.getRange(1, 1, 1, headers.length).setFontWeight("bold");
     
     // Add Dummy Data
-    const dummyRow = ["John Doe", "WL, ACOUSTIC", "4", "", "Excited to serve!"];
+    const dummyRow = ["John Doe", "WL, ACOUSTIC", "4", "", "Excited to serve!", normalizeName("John Doe")];
     dbSheet.appendRow(dummyRow);
     console.log("Created Ministry Members sheet with dummy data.");
   }
+
+  // Ensure the canonical-name column is labeled for existing spreadsheets too.
+  if (dbSheet.getRange(1, 6).getValue() !== CONFIG.sheetHeaders.canonicalName) {
+    dbSheet.getRange(1, 6).setValue(CONFIG.sheetHeaders.canonicalName);
+  }
+  dbSheet.getRange(1, 1, 1, 6).setFontWeight("bold");
 
   // 2. Create Form Metadata sheet if it doesn't exist
   let metaSheet = ss.getSheetByName(CONFIG.sheetNames.formMetadata);
