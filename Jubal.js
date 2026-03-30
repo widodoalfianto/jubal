@@ -100,32 +100,17 @@ function parseUnavailableDates(raw) {
   const results = [];
 
   parts.forEach(part => {
-    // Remove trailing descriptions after ' - '
-    const cleaned = part.replace(/\s*-\s*.*/, '').trim();
-
-    // Handle explicit ranges like '3/29 - 4/5'
-    const rangeMatch = part.match(/^(.+?)\s*-\s*(.+)$/);
-    if (rangeMatch) {
-      const start = parseSingleDate(rangeMatch[1]);
-      const end = parseSingleDate(rangeMatch[2]);
-      if (start && end) {
-        // Add start and end as representatives (do not expand full range to avoid large lists)
-        results.push(formatDateMMDD(start));
-        results.push(formatDateMMDD(end));
-        return;
-      } else {
-        errors.push(part);
-        return;
-      }
+    const rangeKeys = extractDateRangeKeys(part);
+    if (rangeKeys) {
+      results.push(rangeKeys[0]);
+      results.push(rangeKeys[1]);
+      return;
     }
 
-    const dt = parseSingleDate(cleaned);
-    if (dt) {
-      results.push(formatDateMMDD(dt));
+    const dateKey = extractDateKey(part);
+    if (dateKey) {
+      results.push(dateKey);
     } else {
-      // Fallback: take first 5 chars (likely MM/dd)
-      const fallback = cleaned.substring(0, 5);
-      results.push(fallback);
       errors.push(part);
     }
   });
@@ -172,6 +157,112 @@ function formatDateMMDD(d) {
   const mm = ('0' + (d.getMonth() + 1)).slice(-2);
   const dd = ('0' + d.getDate()).slice(-2);
   return mm + '/' + dd;
+}
+
+function extractDateRangeKeys(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const raw = String(value).trim();
+  const rangeMatch = raw.match(/^(.+?)\s*-\s*(.+)$/);
+  if (!rangeMatch) return null;
+
+  const startKey = extractDateKey(rangeMatch[1]);
+  const endKey = extractDateKey(rangeMatch[2]);
+  if (!startKey || !endKey) return null;
+
+  return [startKey, endKey];
+}
+
+function extractDateKey(value) {
+  if (value === null || value === undefined || value === '') return '';
+  if (Object.prototype.toString.call(value) === '[object Date]' && !isNaN(value.getTime())) {
+    return formatDateMMDD(value);
+  }
+
+  const raw = String(value).trim();
+  if (!raw) return '';
+
+  const patterns = [
+    /\b(\d{4}-\d{1,2}-\d{1,2})\b/,
+    /\b(\d{1,2}\/\d{1,2}(?:\/\d{2,4})?)\b/,
+    /\b([A-Za-z]+ \d{1,2}(?:, \d{4})?)\b/
+  ];
+
+  for (let i = 0; i < patterns.length; i++) {
+    const match = raw.match(patterns[i]);
+    if (!match) continue;
+
+    const parsed = parseSingleDate(match[1]);
+    if (parsed) return formatDateMMDD(parsed);
+  }
+
+  const parsed = parseSingleDate(raw);
+  return parsed ? formatDateMMDD(parsed) : '';
+}
+
+function extractDateLabel(value) {
+  if (value === null || value === undefined || value === '') return '';
+  const raw = String(value).trim();
+  if (!raw) return '';
+
+  const patterns = [
+    /^\d{4}-\d{1,2}-\d{1,2}\s*[-:]\s*(.+)$/,
+    /^\d{1,2}\/\d{1,2}(?:\/\d{2,4})?\s*[-:]\s*(.+)$/,
+    /^[A-Za-z]+ \d{1,2}(?:, \d{4})?\s*[-:]\s*(.+)$/
+  ];
+
+  for (let i = 0; i < patterns.length; i++) {
+    const match = raw.match(patterns[i]);
+    if (match && match[1]) return match[1].trim();
+  }
+
+  return '';
+}
+
+function normalizeDateChoice(value) {
+  const dateKey = extractDateKey(value);
+  if (!dateKey) return '';
+
+  const label = extractDateLabel(value);
+  return label ? `${dateKey} - ${label}` : dateKey;
+}
+
+function mergeDateChoices(choices) {
+  const byDate = {};
+
+  (choices || []).forEach(choice => {
+    const normalized = normalizeDateChoice(choice);
+    const dateKey = extractDateKey(normalized);
+    if (!dateKey) return;
+
+    if (!byDate[dateKey]) {
+      byDate[dateKey] = {
+        dateKey: dateKey,
+        labels: []
+      };
+    }
+
+    const label = extractDateLabel(normalized);
+    if (label && byDate[dateKey].labels.indexOf(label) === -1) {
+      byDate[dateKey].labels.push(label);
+    }
+  });
+
+  return sortDateChoices(Object.keys(byDate).map(dateKey => {
+    const labels = byDate[dateKey].labels;
+    return labels.length ? `${dateKey} - ${labels.join(', ')}` : dateKey;
+  }));
+}
+
+function sortDateChoices(choices) {
+  return (choices || [])
+    .map((choice, index) => ({ choice: normalizeDateChoice(choice) || String(choice).trim(), index: index, key: extractDateKey(choice) }))
+    .sort((a, b) => {
+      if (a.key && b.key && a.key !== b.key) return a.key.localeCompare(b.key);
+      if (a.key && !b.key) return -1;
+      if (!a.key && b.key) return 1;
+      return a.index - b.index;
+    })
+    .map(item => item.choice);
 }
 
 function safeGetScriptTimeZone() {
@@ -432,7 +523,7 @@ function sortEvents(events) {
 }
 
 function formatEventChoice(event) {
-  return event.mmdd + (event.label ? ' - ' + event.label : '');
+  return normalizeDateChoice(event.mmdd + (event.label ? ' - ' + event.label : ''));
 }
 
 function getAutomaticSpecialEvents(year, month, timeZone) {
@@ -738,8 +829,10 @@ function getLegacyMonthlyEventChoices(year, month, timeZone) {
 
   if (!events.length) return [];
 
-  return sortEvents(mergeEventObjects(events.concat(getAutomaticSpecialEvents(year, month, timeZone))))
-    .map(formatEventChoice);
+  return mergeDateChoices(
+    sortEvents(mergeEventObjects(events.concat(getAutomaticSpecialEvents(year, month, timeZone))))
+      .map(formatEventChoice)
+  );
 }
 
 function getAvailabilitySheetHeaderChoices(year, month, settings) {
@@ -753,18 +846,19 @@ function getAvailabilitySheetHeaderChoices(year, month, settings) {
 
   const headers = sheet.getRange(CONFIG.layout.dateRowIndex, 2, 1, lastCol - 1)
     .getDisplayValues()[0]
-    .map(value => String(value).trim())
+    .map(normalizeDateChoice)
     .filter(Boolean);
 
   if (!headers.length) return [];
 
   const extras = getAutomaticSpecialEvents(year, month, runtimeSettings.timeZone).map(formatEventChoice);
   extras.forEach(choice => {
-    const baseDate = choice.substring(0, 5);
-    if (!headers.includes(choice) && !headers.includes(baseDate)) headers.push(choice);
+    const choiceKey = extractDateKey(choice);
+    const alreadyPresent = headers.some(header => extractDateKey(header) === choiceKey);
+    if (!alreadyPresent) headers.push(choice);
   });
 
-  return headers.sort();
+  return mergeDateChoices(headers);
 }
 
 function getBuiltInFallbackServiceDates(year, month, timeZone) {
@@ -789,7 +883,7 @@ function getBuiltInFallbackServiceDates(year, month, timeZone) {
     serviceDates.push(formatEventChoice(event));
   });
 
-  return Array.from(new Set(serviceDates)).sort();
+  return mergeDateChoices(Array.from(new Set(serviceDates)));
 }
 
 /**
@@ -1028,7 +1122,7 @@ function getServiceDates(year, month) {
       .filter(event => event.includeInSchedule)
       .map(formatEventChoice);
 
-    if (scheduleChoices.length) return scheduleChoices;
+    if (scheduleChoices.length) return mergeDateChoices(scheduleChoices);
   } catch (err) {
     console.error('getServiceDates failed, falling back to built-in defaults: ' + err.message);
   }
@@ -1196,8 +1290,9 @@ function syncFormWithSheet(formId, sheetName) {
   }
 
   const dateHeaders = sheet.getRange(CONFIG.layout.dateRowIndex, 2, 1, lastCol - 1).getDisplayValues()[0].map(h => String(h).trim()).filter(Boolean);
+  const normalizedHeaders = mergeDateChoices(dateHeaders);
 
-  if (!dateHeaders.length) {
+  if (!normalizedHeaders.length) {
     console.log('syncFormWithSheet: no date headers found');
     return;
   }
@@ -1217,7 +1312,7 @@ function syncFormWithSheet(formId, sheetName) {
     return;
   }
 
-  const choices = dateHeaders.map(d => target.createChoice(d));
+  const choices = normalizedHeaders.map(d => target.createChoice(d));
   target.setChoices(choices);
   console.log('syncFormWithSheet: updated form choices from sheet ' + sheetName);
 }
@@ -1305,8 +1400,8 @@ function ensureMonthlyEventsFor(year, month) {
       }
 
       if (ry === year && (rmNum === month || rmNum === (month + 1))) {
-        // Check date matches (either ISO or MM/dd prefix)
-        if (rd.indexOf(ev.date) === 0 || rd.indexOf(formatDateMMDD(new Date(ev.date))) === 0) {
+        // Compare normalized date keys to avoid format and timezone drift.
+        if (extractDateKey(rd) === extractDateKey(ev.date)) {
           found = true;
           break;
         }
@@ -1582,9 +1677,7 @@ function updateAvailability() {
     .getRange(CONFIG.layout.dateRowIndex, 2, 1, lastCol - 1)
     .getDisplayValues()[0];
 
-  const serviceDateKeys = dateHeaders.map(h => {
-    return String(h).trim().substring(0, 5);
-  });
+  const serviceDateKeys = dateHeaders.map(extractDateKey);
 
   console.log('Standardized Date Keys: ' + serviceDateKeys.join(', '));
 
