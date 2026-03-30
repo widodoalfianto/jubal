@@ -129,10 +129,10 @@ Use the `Events` sheet for one-off additions or removals in a specific month. Th
 
 Recommended columns:
 - **Enabled**
-- **Date**: a date for the event (supports `MM/DD`, `YYYY-MM-DD`, `Mar 29`, etc.)
+- **Date**: use a real date cell in `YYYY-MM-DD` format
 - **Event**: the event name shown on the form and schedule
 - **Action**: `ADD` or `REMOVE`
-- **Recurring Event**: optional stable name for matching a recurring event such as `corporate_prayer`
+- **Recurring Event**: optional. Use the same event name from `Recurring` when moving or cancelling a recurring event
 - **Include In Form**
 - **Include In Schedule**
 - **Notes**

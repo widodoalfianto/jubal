@@ -1547,24 +1547,78 @@ function applyCheckboxColumn(sheet, column, numRows) {
   sheet.getRange(2, column, numRows, 1).insertCheckboxes();
 }
 
-function applyDropdownColumn(sheet, column, values, numRows) {
+function applyDropdownColumn(sheet, column, values, numRows, allowInvalid) {
   if (!sheet || numRows <= 0) return;
   const rule = SpreadsheetApp.newDataValidation()
     .requireValueInList(values, true)
-    .setAllowInvalid(true)
+    .setAllowInvalid(allowInvalid === true)
     .build();
   sheet.getRange(2, column, numRows, 1).setDataValidation(rule);
+}
+
+function applyDateColumn(sheet, column, numRows, formatPattern) {
+  if (!sheet || numRows <= 0) return;
+  const rule = SpreadsheetApp.newDataValidation()
+    .requireDate()
+    .setAllowInvalid(false)
+    .build();
+  sheet.getRange(2, column, numRows, 1).setDataValidation(rule);
+  sheet.getRange(2, column, numRows, 1).setNumberFormat(formatPattern || 'yyyy-mm-dd');
+}
+
+function setHeaderNotes(sheet, notes) {
+  if (!sheet || !notes || !notes.length) return;
+  sheet.getRange(1, 1, 1, notes.length).setNotes([notes]);
+}
+
+function styleConfigHeader(sheet, backgrounds) {
+  if (!sheet || !backgrounds || !backgrounds.length) return;
+  const range = sheet.getRange(1, 1, 1, backgrounds.length);
+  range.setBackgrounds([backgrounds]);
+  range.setFontWeight('bold');
+}
+
+function getRecurringEventDropdownValues() {
+  const sheet = getConfiguredRecurringSheet();
+  if (!sheet || sheet.getLastRow() < 2) return [];
+
+  const headerMap = getSheetHeaderMap(sheet);
+  const eventIndex = headerMap.event;
+  if (eventIndex === undefined) return [];
+
+  const values = sheet
+    .getRange(2, eventIndex + 1, sheet.getLastRow() - 1, 1)
+    .getDisplayValues()
+    .flat()
+    .map(value => String(value || '').trim())
+    .filter(Boolean);
+
+  return values.filter((value, index) => values.indexOf(value) === index);
 }
 
 function configureRecurringSheetUi(sheet) {
   if (!sheet) return;
   const maxRows = Math.max(sheet.getMaxRows() - 1, 1);
   sheet.setFrozenRows(1);
+  styleConfigHeader(sheet, ['#d9ead3', '#fce5cd', '#cfe2f3', '#cfe2f3', '#cfe2f3', '#fff2cc', '#fff2cc', '#d9ead3', '#d9ead3', '#ead1dc']);
+  setHeaderNotes(sheet, [
+    'Check this to use the row.',
+    'Name shown on the form and schedule. Leave blank for plain Sunday dates.',
+    'Weekly = every week. Monthly = like first Friday. Yearly = fixed date each year. Easter = Easter Sunday.',
+    'Pick the weekday for weekly or monthly patterns.',
+    'Use "every" for weekly rows, or 1/2/3/4/5/last for monthly patterns.',
+    'Use "all" for every month, or pick a specific month for yearly events.',
+    'Day of month for yearly dates like Christmas on 25.',
+    'Check to show this event on the availability form.',
+    'Check to show this event on the schedule sheet.',
+    'Optional reminder for admins.'
+  ]);
   applyCheckboxColumn(sheet, 1, maxRows);
   applyDropdownColumn(sheet, 3, ['Weekly', 'Monthly', 'Yearly', 'Easter'], maxRows);
   applyDropdownColumn(sheet, 4, ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'], maxRows);
   applyDropdownColumn(sheet, 5, ['every', '1', '2', '3', '4', '5', 'last'], maxRows);
   applyDropdownColumn(sheet, 6, ['all', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', 'January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'], maxRows);
+  sheet.getRange(2, 7, maxRows, 1).setNumberFormat('0');
   applyCheckboxColumn(sheet, 8, maxRows);
   applyCheckboxColumn(sheet, 9, maxRows);
   sheet.autoResizeColumns(1, Math.min(10, sheet.getLastColumn()));
@@ -1574,8 +1628,24 @@ function configureEventsSheetUi(sheet) {
   if (!sheet) return;
   const maxRows = Math.max(sheet.getMaxRows() - 1, 1);
   sheet.setFrozenRows(1);
+  styleConfigHeader(sheet, ['#d9ead3', '#f4cccc', '#fce5cd', '#cfe2f3', '#cfe2f3', '#d9ead3', '#d9ead3', '#ead1dc']);
+  setHeaderNotes(sheet, [
+    'Check this to use the row.',
+    'Use a real date cell. Recommended format: yyyy-mm-dd.',
+    'Name shown on the form and schedule for this one-time event.',
+    'ADD creates a one-time event. REMOVE cancels one date from the normal schedule.',
+    'Optional. Use the same event name as the Recurring sheet when moving or cancelling a recurring event.',
+    'Check to show this event on the availability form.',
+    'Check to show this event on the schedule sheet.',
+    'Optional reminder for admins.'
+  ]);
   applyCheckboxColumn(sheet, 1, maxRows);
+  applyDateColumn(sheet, 2, maxRows, 'yyyy-mm-dd');
   applyDropdownColumn(sheet, 4, ['ADD', 'REMOVE'], maxRows);
+  const recurringEventValues = getRecurringEventDropdownValues();
+  if (recurringEventValues.length) {
+    applyDropdownColumn(sheet, 5, recurringEventValues, maxRows, true);
+  }
   applyCheckboxColumn(sheet, 6, maxRows);
   applyCheckboxColumn(sheet, 7, maxRows);
   sheet.autoResizeColumns(1, Math.min(8, sheet.getLastColumn()));
@@ -2253,6 +2323,10 @@ function initializeProject() {
   if (!eventsSheet) {
     eventsSheet = ss.insertSheet(CONFIG.sheetNames.events);
     eventsSheet.appendRow(['Enabled', 'Date', 'Event', 'Action', 'Recurring Event', 'Include In Form', 'Include In Schedule', 'Notes']);
+    eventsSheet.getRange(2, 1, 2, 8).setValues([
+      [false, new Date(2026, 3, 3), 'Good Friday', 'ADD', '', true, true, 'Example one-time event. Change the date, then check Enabled to use it.'],
+      [false, new Date(2026, 3, 3), 'Corporate Prayer', 'REMOVE', 'Corporate Prayer', true, true, 'Example: remove one recurring event date for a specific month.']
+    ]);
     eventsSheet.getRange(1, 1, 1, 8).setFontWeight('bold');
     configureEventsSheetUi(eventsSheet);
     console.log("Created Events sheet.");

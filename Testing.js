@@ -581,5 +581,9 @@ function getDefaultRecurringSheetRows() {
 }
 
 function getDefaultEventsSheetRows() {
-  return [['Enabled', 'Date', 'Event', 'Action', 'Recurring Event', 'Include In Form', 'Include In Schedule', 'Notes']];
+  return [
+    ['Enabled', 'Date', 'Event', 'Action', 'Recurring Event', 'Include In Form', 'Include In Schedule', 'Notes'],
+    [false, new Date(2026, 3, 3), 'Good Friday', 'ADD', '', true, true, 'Example one-time event. Change the date, then check Enabled to use it.'],
+    [false, new Date(2026, 3, 3), 'Corporate Prayer', 'REMOVE', 'Corporate Prayer', true, true, 'Example: remove one recurring event date for a specific month.']
+  ];
 }
