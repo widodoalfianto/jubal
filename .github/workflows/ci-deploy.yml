@@ -115,16 +115,15 @@ jobs:
           fi
           SCRIPT_ID="${SCRIPT_ID}" bash scripts/create_clasp_json.sh
 
-      - name: Authenticate clasp using service account credentials
+      - name: Write clasp auth credentials
         env:
-          GCP_CREDS: ${{ secrets.GCP_CREDENTIALS }}
+          CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
         run: |
-          if [ -z "${GCP_CREDS}" ]; then
-            echo "GCP_CREDENTIALS secret is not set.";
+          if [ -z "${CLASPRC_JSON}" ]; then
+            echo "CLASPRC_JSON secret is not set.";
             exit 1;
           fi
-          echo "${GCP_CREDS}" > gcp-creds.json
-          clasp login --creds gcp-creds.json
+          printf '%s' "${CLASPRC_JSON}" > "$HOME/.clasprc.json"
 
       - name: Push project to Apps Script
         run: clasp push --force
@@ -136,7 +135,7 @@ jobs:
 
       - name: Cleanup credentials
         run: |
-          shred -u gcp-creds.json || rm -f gcp-creds.json || true
+          shred -u "$HOME/.clasprc.json" || rm -f "$HOME/.clasprc.json" || true
           rm -f .clasp.json || true
 
   test-dev:
@@ -222,16 +221,15 @@ jobs:
           fi
           SCRIPT_ID="${SCRIPT_ID}" bash scripts/create_clasp_json.sh
 
-      - name: Authenticate clasp using service account credentials
+      - name: Write clasp auth credentials
         env:
-          GCP_CREDS: ${{ secrets.GCP_CREDENTIALS }}
+          CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
         run: |
-          if [ -z "${GCP_CREDS}" ]; then
-            echo "GCP_CREDENTIALS secret is not set.";
+          if [ -z "${CLASPRC_JSON}" ]; then
+            echo "CLASPRC_JSON secret is not set.";
             exit 1;
           fi
-          echo "${GCP_CREDS}" > gcp-creds.json
-          clasp login --creds gcp-creds.json
+          printf '%s' "${CLASPRC_JSON}" > "$HOME/.clasprc.json"
 
       - name: Push project to Apps Script
         run: clasp push --force
@@ -243,7 +241,7 @@ jobs:
 
       - name: Cleanup credentials
         run: |
-          shred -u gcp-creds.json || rm -f gcp-creds.json || true
+          shred -u "$HOME/.clasprc.json" || rm -f "$HOME/.clasprc.json" || true
           rm -f .clasp.json || true
 
 # Tenant registry notes:
