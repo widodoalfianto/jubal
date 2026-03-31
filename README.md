@@ -105,30 +105,30 @@ The default schedule is now just **all Sundays** for the target month.
 Use the `Recurring` sheet to define repeatable patterns for your church. This is the preferred sheet for:
 - weekly recurring events, such as Sunday services
 - monthly recurring events, such as first-Friday `Corporate Prayer`
-- yearly recurring events, such as `Christmas`
-- movable yearly events, such as `Easter`
+- simple repeating patterns that happen the same way most months
 
 Most churches only need these columns:
 - **Enabled**
 - **Event**
-- **Frequency**: `Weekly`, `Monthly`, `Yearly`, or `Easter`
+- **Frequency**: `Weekly` or `Monthly`
 - **Weekday**
 - **Week Of Month**
-- **Month**
-- **Day**
 - **Include In Form**
 - **Include In Schedule**
 - **Notes**
 
 Examples:
 - Sundays every week:
-  - `TRUE |  | Weekly | Sunday | every | all |  | TRUE | TRUE | Leave Event blank to show plain Sunday dates`
+  - `TRUE |  | Weekly | Sunday | every | TRUE | TRUE | Leave Event blank to show plain Sunday dates`
 - First Friday Corporate Prayer:
-  - `TRUE | Corporate Prayer | Monthly | Friday | 1 | all |  | TRUE | TRUE |`
-- Easter:
-  - `TRUE | Easter | Easter |  |  | all |  | TRUE | TRUE |`
-- Christmas:
-  - `TRUE | Christmas | Yearly |  |  | 12 | 25 | TRUE | TRUE |`
+  - `TRUE | Corporate Prayer | Monthly | Friday | 1 | TRUE | TRUE |`
+
+Use the `Events` sheet, not `Recurring`, for dated specials like:
+- Easter
+- Christmas
+- Good Friday
+- Christmas Eve
+- retreats or one-off ministry nights
 
 Legacy note:
 - Existing `Events` sheets from earlier versions may contain recurring rules. Running `initializeProject()` will rename them to `Recurring` when it is safe to do so.
@@ -140,7 +140,7 @@ Use the `Events` sheet for one-off additions or removals in a specific month. Th
 
 Recommended columns:
 - **Enabled**
-- **Date**: use a real date cell in `YYYY-MM-DD` format
+- **Date**: click into the cell and use the calendar date picker
 - **Event**: the event name shown on the form and schedule
 - **Action**: `ADD` or `REMOVE`
 - **Recurring Event**: optional. Use the same event name from `Recurring` when moving or cancelling a recurring event
@@ -153,6 +153,7 @@ Behavior:
   - Sundays by default
   - plus any enabled recurring rules from `Recurring`
 - Then `Events` can remove or add one-off events for that specific month.
+- Easter and Christmas should be entered here as dated event rows when you want them included.
 - Past one-off events can be moved to `Events Archive` automatically during `monthlySetup()` based on the `events_archive_frequency` setting.
 - Built-in example rows stay in `Events` as templates and are not archived.
 

@@ -2156,10 +2156,11 @@ function applyDateColumn(sheet, column, numRows, formatPattern) {
   if (!sheet || numRows <= 0) return;
   const rule = SpreadsheetApp.newDataValidation()
     .requireDate()
+    .setHelpText('Click the cell and use the calendar picker, or type a date like Apr 5, 2026.')
     .setAllowInvalid(false)
     .build();
   sheet.getRange(2, column, numRows, 1).setDataValidation(rule);
-  sheet.getRange(2, column, numRows, 1).setNumberFormat(formatPattern || 'yyyy-mm-dd');
+  sheet.getRange(2, column, numRows, 1).setNumberFormat(formatPattern || 'ddd, mmm d, yyyy');
 }
 
 function setHeaderNotes(sheet, notes) {
@@ -2195,27 +2196,54 @@ function getRecurringEventDropdownValues() {
 function configureRecurringSheetUi(sheet) {
   if (!sheet) return;
   const maxRows = Math.max(sheet.getMaxRows() - 1, 1);
+  const headerMap = getSheetHeaderMap(sheet);
+  const hasLegacyYearlyColumns = Object.prototype.hasOwnProperty.call(headerMap, 'month') || Object.prototype.hasOwnProperty.call(headerMap, 'day');
   sheet.setFrozenRows(1);
-  setHeaderNotes(sheet, [
-    'Check this to use the row.',
-    'Name shown on the form and schedule. Leave blank for plain Sunday dates.',
-    'Weekly = every week. Monthly = like first Friday. Yearly = fixed date each year. Easter = Easter Sunday.',
-    'Pick the weekday for weekly or monthly patterns.',
-    'Use "every" for weekly rows, or 1/2/3/4/5/last for monthly patterns.',
-    'Use "all" for every month, or pick a specific month for yearly events.',
-    'Day of month for yearly dates like Christmas on 25.',
-    'Check to show this event on the availability form.',
-    'Check to show this event on the schedule sheet.',
-    'Optional reminder for admins.'
-  ]);
-  applyCheckboxColumn(sheet, 1, maxRows);
-  applyDropdownColumn(sheet, 3, ['Weekly', 'Monthly', 'Yearly', 'Easter'], maxRows);
-  applyDropdownColumn(sheet, 4, ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'], maxRows);
-  applyDropdownColumn(sheet, 5, ['every', '1', '2', '3', '4', '5', 'last'], maxRows);
-  applyDropdownColumn(sheet, 6, ['all', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', 'January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'], maxRows);
-  sheet.getRange(2, 7, maxRows, 1).setNumberFormat('0');
-  applyCheckboxColumn(sheet, 8, maxRows);
-  applyCheckboxColumn(sheet, 9, maxRows);
+  if (hasLegacyYearlyColumns) {
+    setHeaderNotes(sheet, [
+      'Check this to use the row.',
+      'Name shown on the form and schedule. Leave blank for plain Sunday dates.',
+      'Weekly = every week. Monthly = like first Friday. Yearly = fixed date each year. Easter = Easter Sunday.',
+      'Pick the weekday for weekly or monthly patterns.',
+      'Use "every" for weekly rows, or 1/2/3/4/5/last for monthly patterns.',
+      'Use "all" for every month, or pick a specific month for yearly events.',
+      'Day of month for yearly dates like Christmas on 25.',
+      'Check to show this event on the availability form.',
+      'Check to show this event on the schedule sheet.',
+      'Optional reminder for admins.'
+    ]);
+  } else {
+    setHeaderNotes(sheet, [
+      'Check this to use the row.',
+      'Name shown on the form and schedule. Leave blank for plain Sunday dates.',
+      'Weekly = every week. Monthly = like first Friday. Use the Events sheet for dated specials like Easter, Christmas, and Good Friday.',
+      'Pick the weekday for weekly or monthly patterns.',
+      'Use "every" for weekly rows, or 1/2/3/4/5/last for monthly patterns.',
+      'Check to show this event on the availability form.',
+      'Check to show this event on the schedule sheet.',
+      'Optional reminder for admins.'
+    ]);
+  }
+
+  if (headerMap.enabled !== undefined) applyCheckboxColumn(sheet, headerMap.enabled + 1, maxRows);
+  if (headerMap.frequency !== undefined) {
+    const values = hasLegacyYearlyColumns ? ['Weekly', 'Monthly', 'Yearly', 'Easter'] : ['Weekly', 'Monthly'];
+    applyDropdownColumn(sheet, headerMap.frequency + 1, values, maxRows);
+  }
+  if (headerMap.weekday !== undefined) {
+    applyDropdownColumn(sheet, headerMap.weekday + 1, ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'], maxRows);
+  }
+  if (headerMap['week of month'] !== undefined) {
+    applyDropdownColumn(sheet, headerMap['week of month'] + 1, ['every', '1', '2', '3', '4', '5', 'last'], maxRows);
+  }
+  if (headerMap.month !== undefined) {
+    applyDropdownColumn(sheet, headerMap.month + 1, ['all', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', 'January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'], maxRows);
+  }
+  if (headerMap.day !== undefined) {
+    sheet.getRange(2, headerMap.day + 1, maxRows, 1).setNumberFormat('0');
+  }
+  if (headerMap['include in form'] !== undefined) applyCheckboxColumn(sheet, headerMap['include in form'] + 1, maxRows);
+  if (headerMap['include in schedule'] !== undefined) applyCheckboxColumn(sheet, headerMap['include in schedule'] + 1, maxRows);
   applySheetTheme(sheet);
   fitSheetToContent(sheet);
   applyTableBordersToDataRange(sheet);
@@ -2228,7 +2256,7 @@ function configureEventsSheetUi(sheet) {
   sheet.setFrozenRows(1);
   setHeaderNotes(sheet, [
     'Check this to use the row.',
-    'Use a real date cell. Recommended format: yyyy-mm-dd.',
+    'Click the cell and use the calendar picker. Friendly display format: Mon, Apr 5, 2026.',
     'Name shown on the form and schedule for this one-time event.',
     'ADD creates a one-time event. REMOVE cancels one date from the normal schedule.',
     'Optional. Use the same event name as the Recurring sheet when moving or cancelling a recurring event.',
@@ -2237,7 +2265,7 @@ function configureEventsSheetUi(sheet) {
     'Optional reminder for admins.'
   ]);
   applyCheckboxColumn(sheet, 1, maxRows);
-  applyDateColumn(sheet, 2, maxRows, 'yyyy-mm-dd');
+  applyDateColumn(sheet, 2, maxRows, 'ddd, mmm d, yyyy');
   applyDropdownColumn(sheet, 4, ['ADD', 'REMOVE'], maxRows);
   const recurringEventValues = getRecurringEventDropdownValues();
   if (recurringEventValues.length) {
@@ -2358,19 +2386,44 @@ function configureRolesSheetUi(sheet) {
 
 function getRecurringSeedRows() {
   return [
-    ['Enabled', 'Event', 'Frequency', 'Weekday', 'Week Of Month', 'Month', 'Day', 'Include In Form', 'Include In Schedule', 'Notes'],
-    [true, '', 'Weekly', 'Sunday', 'every', 'all', '', true, true, 'Default weekly Sunday schedule. Leave Event blank to show plain dates.'],
-    [false, 'Corporate Prayer', 'Monthly', 'Friday', 1, 'all', '', true, true, 'Enable if your church has a monthly prayer gathering'],
-    [false, 'Easter', 'Easter', '', '', 'all', '', true, true, 'Enable to include Easter automatically each year'],
-    [false, 'Christmas', 'Yearly', '', '', '12', 25, true, true, 'Enable to include Christmas automatically each year']
+    ['Enabled', 'Event', 'Frequency', 'Weekday', 'Week Of Month', 'Include In Form', 'Include In Schedule', 'Notes'],
+    [true, '', 'Weekly', 'Sunday', 'every', true, true, 'Default weekly Sunday schedule. Leave Event blank to show plain dates.'],
+    [false, 'Corporate Prayer', 'Monthly', 'Friday', 1, true, true, 'Enable if your church has a monthly prayer gathering']
   ];
 }
 
+function getUpcomingSpecialEventExampleDates(referenceDate) {
+  const today = referenceDate ? new Date(referenceDate) : new Date();
+  const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+
+  let easter = computeEaster(todayStart.getFullYear());
+  if (easter.getTime() < todayStart.getTime()) {
+    easter = computeEaster(todayStart.getFullYear() + 1);
+  }
+
+  const goodFriday = new Date(easter);
+  goodFriday.setDate(goodFriday.getDate() - 2);
+
+  let christmas = new Date(todayStart.getFullYear(), 11, 25);
+  if (christmas.getTime() < todayStart.getTime()) {
+    christmas = new Date(todayStart.getFullYear() + 1, 11, 25);
+  }
+
+  return {
+    goodFriday: goodFriday,
+    easter: easter,
+    christmas: christmas
+  };
+}
+
 function getEventsSeedRows() {
+  const exampleDates = getUpcomingSpecialEventExampleDates();
   return [
     ['Enabled', 'Date', 'Event', 'Action', 'Recurring Event', 'Include In Form', 'Include In Schedule', 'Notes'],
-    [false, new Date(2026, 3, 3), 'Good Friday', 'ADD', '', true, true, 'Example one-time event. Change the date, then check Enabled to use it.'],
-    [false, new Date(2026, 3, 3), 'Corporate Prayer', 'REMOVE', 'Corporate Prayer', true, true, 'Example: remove one recurring event date for a specific month.']
+    [false, exampleDates.goodFriday, 'Good Friday', 'ADD', '', true, true, 'Example row'],
+    [false, exampleDates.easter, 'Easter', 'ADD', '', true, true, 'Example row'],
+    [false, exampleDates.christmas, 'Christmas', 'ADD', '', true, true, 'Example row'],
+    [false, exampleDates.goodFriday, 'Corporate Prayer', 'REMOVE', 'Corporate Prayer', true, true, 'Example row']
   ];
 }
 
@@ -3542,7 +3595,7 @@ function initializeProject() {
   // 7. Create the new Recurring sheet if no recurring configuration exists.
   if (!recurringSheet && !legacyRecurringSheet) {
     recurringSheet = ss.insertSheet(CONFIG.sheetNames.recurring);
-    recurringSheet.getRange(1, 1, 1, 10).setValues([getRecurringSeedRows()[0]]);
+    recurringSheet.getRange(1, 1, 1, 8).setValues([getRecurringSeedRows()[0]]);
     seedSheetRowsIfEmpty(recurringSheet, getRecurringSeedRows());
     configureRecurringSheetUi(recurringSheet);
     console.log("Created Recurring sheet.");

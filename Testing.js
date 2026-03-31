@@ -371,17 +371,18 @@ function runUnitTests() {
   } catch (e) { recordResult('getServiceDates:removePlainSunday', false, e.message); }
 
   try {
-    const recurringRows = getDefaultRecurringSheetRows();
-    recurringRows[4][0] = true; // Enable Easter
-    recurringRows[5][0] = true; // Enable Christmas
-    replaceSheetContents(CONFIG.sheetNames.recurring, recurringRows);
-    replaceSheetContents(CONFIG.sheetNames.events, getDefaultEventsSheetRows());
+    const eventRows = getDefaultEventsSheetRows().map(row => row.slice());
+    eventRows.forEach(row => {
+      if (row[2] === 'Easter' || row[2] === 'Christmas') row[0] = true;
+    });
+    replaceSheetContents(CONFIG.sheetNames.recurring, getDefaultRecurringSheetRows());
+    replaceSheetContents(CONFIG.sheetNames.events, eventRows);
     const aprilDates = getServiceDates(2026, 3); // April 2026
     const decemberDates = getServiceDates(2026, 11); // December 2026
-    if (!aprilDates.includes('04/05 - Easter')) throw new Error('Easter should appear when yearly event is enabled');
-    if (!decemberDates.includes('12/25 - Christmas')) throw new Error('Christmas should appear when yearly event is enabled');
-    recordResult('getServiceDates:yearlyRecurringEvents', true, 'Yearly recurring events enabled successfully');
-  } catch (e) { recordResult('getServiceDates:yearlyRecurringEvents', false, e.message); }
+    if (!aprilDates.includes('04/05 - Easter')) throw new Error('Easter should appear when enabled in Events');
+    if (!decemberDates.includes('12/25 - Christmas')) throw new Error('Christmas should appear when enabled in Events');
+    recordResult('getServiceDates:datedSpecialEvents', true, 'Dated special events are driven by Events');
+  } catch (e) { recordResult('getServiceDates:datedSpecialEvents', false, e.message); }
 
   try {
     deleteSheetIfExists(CONFIG.sheetNames.events);
@@ -398,9 +399,12 @@ function runUnitTests() {
     deleteSheetIfExists(CONFIG.sheetNames.monthlyEvents);
     const recurringRows = getDefaultRecurringSheetRows();
     recurringRows[3][0] = true; // Enable corporate prayer
-    recurringRows[4][0] = true; // Enable Easter
     replaceSheetContents(CONFIG.sheetNames.recurring, recurringRows);
-    replaceSheetContents(CONFIG.sheetNames.events, getDefaultEventsSheetRows());
+    const eventRows = getDefaultEventsSheetRows().map(row => row.slice());
+    eventRows.forEach(row => {
+      if (row[2] === 'Easter') row[0] = true;
+    });
+    replaceSheetContents(CONFIG.sheetNames.events, eventRows);
     const sd = getServiceDates(2026, 3); // April 2026
     if (!sd.includes('04/03 - Corporate Prayer')) throw new Error('Corporate Prayer should be labeled');
     if (!sd.includes('04/05 - Easter')) throw new Error('Easter should be labeled');
@@ -602,15 +606,27 @@ function runIntegrationTests() {
     const settingsSheet = ss.getSheetByName(CONFIG.sheetNames.settings);
     const adminsSheet = ss.getSheetByName(CONFIG.sheetNames.admins);
     const rolesSheet = ss.getSheetByName(CONFIG.sheetNames.rolesConfig);
+    const recurringSheet = ss.getSheetByName(CONFIG.sheetNames.recurring) || ss.getSheetByName(CONFIG.sheetNames.recurringEvents);
+    const eventsSheet = ss.getSheetByName(CONFIG.sheetNames.events) || ss.getSheetByName(CONFIG.sheetNames.monthlyEvents);
     if (!settingsSheet) throw new Error('Settings sheet missing');
     if (!adminsSheet) throw new Error('Admins sheet missing');
     if (!rolesSheet) throw new Error('Roles sheet missing');
     const settingsValues = settingsSheet.getRange(2, 1, settingsSheet.getLastRow() - 1, 1).getDisplayValues().flat();
-    if (!ss.getSheetByName(CONFIG.sheetNames.recurring) && !ss.getSheetByName(CONFIG.sheetNames.recurringEvents)) {
+    if (!recurringSheet) {
       throw new Error('Recurring sheet missing');
     }
-    if (!ss.getSheetByName(CONFIG.sheetNames.events) && !ss.getSheetByName(CONFIG.sheetNames.monthlyEvents)) {
+    if (!eventsSheet) {
       throw new Error('Events sheet missing');
+    }
+    const recurringHeaders = recurringSheet.getRange(1, 1, 1, recurringSheet.getLastColumn()).getDisplayValues()[0];
+    if (recurringHeaders.indexOf('Month') !== -1 || recurringHeaders.indexOf('Day') !== -1) {
+      throw new Error('Recurring should use the simplified weekly/monthly layout without Month or Day columns');
+    }
+    if (!eventsSheet.getDataRange().getDisplayValues().some(row => row.join('|').indexOf('Easter') !== -1)) {
+      throw new Error('Events sheet should include an Easter example row');
+    }
+    if (!eventsSheet.getDataRange().getDisplayValues().some(row => row.join('|').indexOf('Christmas') !== -1)) {
+      throw new Error('Events sheet should include a Christmas example row');
     }
     if (!dbSheet || dbSheet.getRange(1, memberColumns.canonicalName).getValue() !== CONFIG.sheetHeaders.canonicalName) {
       throw new Error('Canonical Name header missing from Ministry Members');
@@ -776,19 +792,19 @@ function getDefaultRolesSheetRows() {
 
 function getDefaultRecurringSheetRows() {
   return [
-    ['Enabled', 'Event', 'Frequency', 'Weekday', 'Week Of Month', 'Month', 'Day', 'Include In Form', 'Include In Schedule', 'Notes'],
-    [true, '', 'Weekly', 'Sunday', 'every', 'all', '', true, true, 'Default weekly Sunday schedule. Leave Event blank to show plain dates.'],
-    [false, 'Midweek Rehearsal', 'Weekly', 'Wednesday', 'every', 'all', '', false, false, 'Example weekly event that stays off the form by default'],
-    [false, 'Corporate Prayer', 'Monthly', 'Friday', 1, 'all', '', true, true, 'Enable if your church has a monthly prayer gathering'],
-    [false, 'Easter', 'Easter', '', '', 'all', '', true, true, 'Enable to include Easter automatically each year'],
-    [false, 'Christmas', 'Yearly', '', '', '12', 25, true, true, 'Enable to include Christmas automatically each year']
+    ['Enabled', 'Event', 'Frequency', 'Weekday', 'Week Of Month', 'Include In Form', 'Include In Schedule', 'Notes'],
+    [true, '', 'Weekly', 'Sunday', 'every', true, true, 'Default weekly Sunday schedule. Leave Event blank to show plain dates.'],
+    [false, 'Midweek Rehearsal', 'Weekly', 'Wednesday', 'every', false, false, 'Example weekly event that stays off the form by default'],
+    [false, 'Corporate Prayer', 'Monthly', 'Friday', 1, true, true, 'Enable if your church has a monthly prayer gathering']
   ];
 }
 
 function getDefaultEventsSheetRows() {
   return [
     ['Enabled', 'Date', 'Event', 'Action', 'Recurring Event', 'Include In Form', 'Include In Schedule', 'Notes'],
-    [false, new Date(2026, 3, 3), 'Good Friday', 'ADD', '', true, true, 'Example one-time event. Change the date, then check Enabled to use it.'],
-    [false, new Date(2026, 3, 3), 'Corporate Prayer', 'REMOVE', 'Corporate Prayer', true, true, 'Example: remove one recurring event date for a specific month.']
+    [false, new Date(2026, 3, 3), 'Good Friday', 'ADD', '', true, true, 'Example row'],
+    [false, new Date(2026, 3, 5), 'Easter', 'ADD', '', true, true, 'Example row'],
+    [false, new Date(2026, 11, 25), 'Christmas', 'ADD', '', true, true, 'Example row'],
+    [false, new Date(2026, 3, 3), 'Corporate Prayer', 'REMOVE', 'Corporate Prayer', true, true, 'Example row']
   ];
 }
