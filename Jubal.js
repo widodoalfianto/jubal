@@ -2426,7 +2426,7 @@ function configureEventsSheetUi(sheet) {
   sheet.setFrozenRows(1);
   setHeaderNotes(sheet, [
     'Check this to use the row.',
-    'Click the cell and use the calendar picker. For the easiest workflow, use Jubal > Add Special Event.',
+    'Click the cell and use the calendar picker. For the easiest workflow, use the Add Special Event menu option.',
     'Name shown on the form and schedule for this one-time event.',
     'ADD creates a one-time event. REMOVE cancels one date from the normal schedule.',
     'Optional. Use the same event name as the Recurring sheet when moving or cancelling a recurring event.',
@@ -2592,7 +2592,7 @@ function getEventsSeedRows() {
   const exampleDates = getUpcomingSpecialEventExampleDates();
   return [
     ['Enabled', 'Date', 'Event', 'Action', 'Recurring Event', 'Include In Form', 'Include In Schedule', 'Notes'],
-    [false, exampleDates.goodFriday, 'Good Friday', 'ADD', '', true, true, 'Example row - easiest method: Jubal > Add Special Event. If you edit directly in the sheet, double-click the Date cell to open the picker.'],
+    [false, exampleDates.goodFriday, 'Good Friday', 'ADD', '', true, true, 'Example row - easiest method: use the Add Special Event menu option. If you edit directly in the sheet, double-click the Date cell to open the picker.'],
     [false, exampleDates.easter, 'Easter', 'ADD', '', true, true, 'Example row - dated special events like Easter belong in Events.'],
     [false, exampleDates.christmas, 'Christmas', 'ADD', '', true, true, 'Example row - dated special events like Christmas belong in Events.'],
     [false, exampleDates.goodFriday, 'Corporate Prayer', 'REMOVE', 'Corporate Prayer', true, true, 'Example row - use REMOVE when a recurring event should not happen on one date.']
