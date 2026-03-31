@@ -1457,8 +1457,10 @@ function buildReconciliationAlertPayload(rowsToAlert, sheet, settings) {
 
   const itemLabel = rowsToAlert.length === 1 ? 'item' : 'items';
   return {
-    subject: `Jubal: ${rowsToAlert.length} ${itemLabel} need${rowsToAlert.length === 1 ? 's' : ''} review`,
+    subject: `${runtimeSettings.churchName}: ${rowsToAlert.length} reconciliation ${itemLabel} need${rowsToAlert.length === 1 ? 's' : ''} review`,
     body: [
+      `Church: ${runtimeSettings.churchName}`,
+      '',
       `Please review the following ${itemLabel} in Jubal:`,
       '',
       items.join('\n\n'),
@@ -1780,8 +1782,9 @@ function createNewFormForMonth(month, year, monthName) {
   const responderUrl = form.getPublishedUrl(); // Responder link for the participants
 
   // Send email notification about the new form
-  const emailSubject = "New Music Ministry Availability Form Created";
-  const emailBody = "A new Music Ministry Availability Form has been created for the month of " + monthName + ".\n\n" +
+  const emailSubject = `${runtimeSettings.churchName}: New availability form created for ${monthName}`;
+  const emailBody = `Church: ${runtimeSettings.churchName}\n\n` +
+                  "A new Music Ministry Availability Form has been created for the month of " + monthName + ".\n\n" +
                   "You can access and fill out the form using the following link:\n" + responderUrl + "\n\n" +
                   "If you need to edit the form, use the following link:\n" + editUrl + "\n\n" +
                   "Please submit your availability as soon as possible.";
@@ -1945,8 +1948,10 @@ function buildAdminPlanningReminder(referenceDate, settings) {
 
   const planMonthName = Utilities.formatDate(planDate, runtimeSettings.timeZone, 'MMMM yyyy');
   const monthlySetupDay = formatDayOfMonthHuman(runtimeSettings.formCreationDay);
-  const subject = `Jubal Reminder: Please review ${planMonthName}`;
+  const subject = `${runtimeSettings.churchName}: Please review ${planMonthName} schedule setup`;
   const bodyLines = [
+    `Church: ${runtimeSettings.churchName}`,
+    '',
     `Please review the schedule setup for ${planMonthName}.`,
     '',
     'Before the monthly form is created, please check these areas:',

@@ -444,6 +444,8 @@ function runUnitTests() {
       formCreationDay: 8
     });
     if (reminder.subject.indexOf('April 2026') === -1) throw new Error('Reminder subject should reference next month');
+    if (reminder.subject.indexOf('Jubal Test') === -1) throw new Error('Reminder subject should include the church name');
+    if (reminder.body.indexOf('Church: Jubal Test') === -1) throw new Error('Reminder body should include the church name');
     if (reminder.body.indexOf('Recurring schedule') === -1 || reminder.body.indexOf('One-time events and changes') === -1) {
       throw new Error('Reminder body should guide admins to Recurring and Events');
     }
