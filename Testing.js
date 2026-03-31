@@ -540,6 +540,19 @@ function runUnitTests() {
   } catch (e) { recordResult('sheetOrder:monthSorting', false, e.message); }
 
   try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    deleteSheetIfExists('Execution Logs');
+    deleteSheetIfExists('Debug Responses');
+    disableDeveloperDiagnostics();
+    logDebug('info', 'Testing default diagnostics mode');
+    logFormResponse({ namedValues: { Name: ['Test'] } });
+    if (ss.getSheetByName('Execution Logs') || ss.getSheetByName('Debug Responses')) {
+      throw new Error('Developer sheets should not be created when diagnostics are disabled');
+    }
+    recordResult('developerDiagnostics:disabledByDefault', true, 'Developer sheets stay out of admin-facing workbooks by default');
+  } catch (e) { recordResult('developerDiagnostics:disabledByDefault', false, e.message); }
+
+  try {
     deleteSheetIfExists(CONFIG.sheetNames.eventsArchive);
     replaceSheetContents(CONFIG.sheetNames.events, getDefaultEventsSheetRows().concat([
       [true, new Date(2026, 11, 24), 'Christmas Eve', 'ADD', '', true, true, 'Past real event'],
@@ -605,6 +618,13 @@ function runIntegrationTests() {
 
   // test: initializeProject seeds the new configuration sheets
   try {
+    deleteSheetIfExists('Execution Logs');
+    deleteSheetIfExists('Debug Responses');
+    disableDeveloperDiagnostics();
+    const executionLogs = ss.insertSheet('Execution Logs');
+    executionLogs.appendRow(['timestamp', 'level', 'message', 'data']);
+    const debugResponses = ss.insertSheet('Debug Responses');
+    debugResponses.appendRow(['timestamp', 'formId', 'responseRow', 'namedValues']);
     initializeProject();
     const dbSheet = ss.getSheetByName(CONFIG.sheetNames.ministryMembers);
     const runtimeSettings = loadRuntimeSettings();
@@ -679,6 +699,9 @@ function runIntegrationTests() {
     }
     if (!sheetUsesFriendlyRolesLayout(rolesSheet)) {
       throw new Error('Roles sheet does not use the friendly role layout');
+    }
+    if (!ss.getSheetByName('Execution Logs').isSheetHidden() || !ss.getSheetByName('Debug Responses').isSheetHidden()) {
+      throw new Error('Developer-only sheets should be hidden from admins by default');
     }
     recordResult('initializeProject:configSheets', true, 'Configuration sheets created');
   } catch (e) { recordResult('initializeProject:configSheets', false, e.message); }

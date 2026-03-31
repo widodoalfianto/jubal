@@ -27,6 +27,65 @@ function onFormSubmit(e) {
   updateDatabase(e);
 }
 
+function getDeveloperSheetNames() {
+  return ['Execution Logs', 'Debug Responses'];
+}
+
+function isDeveloperDiagnosticsEnabled() {
+  try {
+    return PropertiesService.getScriptProperties().getProperty('jubalDeveloperDiagnostics') === 'true';
+  } catch (error) {
+    console.error('Unable to read jubalDeveloperDiagnostics property: ' + error.message);
+    return false;
+  }
+}
+
+function hideDeveloperSheets() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let hiddenCount = 0;
+
+  getDeveloperSheetNames().forEach(sheetName => {
+    const sheet = ss.getSheetByName(sheetName);
+    if (!sheet || sheet.isSheetHidden()) return;
+    try {
+      sheet.hideSheet();
+      hiddenCount++;
+    } catch (error) {
+      console.warn(`Could not hide developer sheet '${sheetName}': ${error.message}`);
+    }
+  });
+
+  return { status: 'hidden', count: hiddenCount };
+}
+
+function showDeveloperSheets() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let shownCount = 0;
+
+  getDeveloperSheetNames().forEach(sheetName => {
+    const sheet = ss.getSheetByName(sheetName);
+    if (!sheet || !sheet.isSheetHidden()) return;
+    try {
+      sheet.showSheet();
+      shownCount++;
+    } catch (error) {
+      console.warn(`Could not show developer sheet '${sheetName}': ${error.message}`);
+    }
+  });
+
+  return { status: 'shown', count: shownCount };
+}
+
+function enableDeveloperDiagnostics() {
+  PropertiesService.getScriptProperties().setProperty('jubalDeveloperDiagnostics', 'true');
+  return showDeveloperSheets();
+}
+
+function disableDeveloperDiagnostics() {
+  PropertiesService.getScriptProperties().deleteProperty('jubalDeveloperDiagnostics');
+  return hideDeveloperSheets();
+}
+
 /**
  * Centralized debug logger. Writes to console and a lightweight sheet for persistent logs.
  * level: 'info' | 'warn' | 'error'
@@ -36,6 +95,8 @@ function logDebug(level, msg, data) {
     const payload = { ts: new Date().toISOString(), level: level, message: msg, data: data || null };
     // Console log for quick inspection in executions
     console.log(JSON.stringify(payload));
+
+    if (!isDeveloperDiagnosticsEnabled()) return;
 
     // Also append to an 'Execution Logs' sheet for persisted diagnostics
     const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -58,6 +119,8 @@ function logDebug(level, msg, data) {
  * Columns: timestamp | formId | responseRow | namedValues (JSON)
  */
 function logFormResponse(e) {
+  if (!isDeveloperDiagnosticsEnabled()) return;
+
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   let dbg = ss.getSheetByName('Debug Responses');
   if (!dbg) {
@@ -494,6 +557,14 @@ function sendEmailToAdmins(subject, body, settings) {
 }
 
 function onOpen() {
+  if (!isDeveloperDiagnosticsEnabled()) {
+    try {
+      hideDeveloperSheets();
+    } catch (error) {
+      console.warn('Could not hide developer sheets on open: ' + error.message);
+    }
+  }
+
   SpreadsheetApp.getUi()
     .createMenu('Jubal')
     .addItem('Add Special Event', 'showAddEventDialog')
@@ -2373,6 +2444,8 @@ function configureEventsSheetUi(sheet) {
   applyCheckboxColumn(sheet, 6, maxRows);
   applyCheckboxColumn(sheet, 7, maxRows);
   applySheetTheme(sheet);
+  sheet.getRange(1, 2).setBackground('#9fc5e8');
+  sheet.getRange(2, 2, maxRows, 1).setBackground('#eef4ff');
   highlightExampleRows(sheet, 8);
   fitSheetToContent(sheet);
   applyTableBordersToDataRange(sheet);
@@ -2519,10 +2592,10 @@ function getEventsSeedRows() {
   const exampleDates = getUpcomingSpecialEventExampleDates();
   return [
     ['Enabled', 'Date', 'Event', 'Action', 'Recurring Event', 'Include In Form', 'Include In Schedule', 'Notes'],
-    [false, exampleDates.goodFriday, 'Good Friday', 'ADD', '', true, true, 'Example row'],
-    [false, exampleDates.easter, 'Easter', 'ADD', '', true, true, 'Example row'],
-    [false, exampleDates.christmas, 'Christmas', 'ADD', '', true, true, 'Example row'],
-    [false, exampleDates.goodFriday, 'Corporate Prayer', 'REMOVE', 'Corporate Prayer', true, true, 'Example row']
+    [false, exampleDates.goodFriday, 'Good Friday', 'ADD', '', true, true, 'Example row - easiest method: Jubal > Add Special Event. If you edit directly in the sheet, double-click the Date cell to open the picker.'],
+    [false, exampleDates.easter, 'Easter', 'ADD', '', true, true, 'Example row - dated special events like Easter belong in Events.'],
+    [false, exampleDates.christmas, 'Christmas', 'ADD', '', true, true, 'Example row - dated special events like Christmas belong in Events.'],
+    [false, exampleDates.goodFriday, 'Corporate Prayer', 'REMOVE', 'Corporate Prayer', true, true, 'Example row - use REMOVE when a recurring event should not happen on one date.']
   ];
 }
 
@@ -3396,6 +3469,10 @@ function runMonthlySetupInternal(options) {
     console.error('Failed to ensure legacy Events entries: ' + err.message);
   }
 
+  if (!isDeveloperDiagnosticsEnabled()) {
+    hideDeveloperSheets();
+  }
+
   reorderWorkbookSheets(today);
   props.setProperty(propertyKey, new Date().toISOString());
   return {
@@ -3714,6 +3791,10 @@ function initializeProject() {
   } else if (sheetUsesFriendlyEventsLayout(eventsSheet)) {
     seedSheetRowsIfEmpty(eventsSheet, getEventsSeedRows());
     configureEventsSheetUi(eventsSheet);
+  }
+
+  if (!isDeveloperDiagnosticsEnabled()) {
+    hideDeveloperSheets();
   }
 
   reorderWorkbookSheets();
