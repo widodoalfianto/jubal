@@ -443,7 +443,7 @@ function runUnitTests() {
       adminEmails: ['admin@example.com'],
       formCreationDay: 8
     });
-    if (reminder.subject.indexOf('April 2026') === -1) throw new Error('Reminder subject should reference next month');
+    if (reminder.subject !== 'Jubal Test: April 2026 Events Reminder') throw new Error('Reminder subject should use the church name and month-forward reminder format');
     if (reminder.subject.indexOf('Jubal Test') === -1) throw new Error('Reminder subject should include the church name');
     if (reminder.body.indexOf('Church: Jubal Test') === -1) throw new Error('Reminder body should include the church name');
     if (reminder.body.indexOf('Recurring schedule') === -1 || reminder.body.indexOf('One-time events and changes') === -1) {

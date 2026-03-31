@@ -1948,7 +1948,7 @@ function buildAdminPlanningReminder(referenceDate, settings) {
 
   const planMonthName = Utilities.formatDate(planDate, runtimeSettings.timeZone, 'MMMM yyyy');
   const monthlySetupDay = formatDayOfMonthHuman(runtimeSettings.formCreationDay);
-  const subject = `${runtimeSettings.churchName}: Please review ${planMonthName} schedule setup`;
+  const subject = `${runtimeSettings.churchName}: ${planMonthName} Events Reminder`;
   const bodyLines = [
     `Church: ${runtimeSettings.churchName}`,
     '',
