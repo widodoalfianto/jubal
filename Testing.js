@@ -282,6 +282,12 @@ function runUnitTests() {
   } catch (e) { recordResult('parseUnavailableDates: invalid input', false, e.message); }
 
   try {
+    if (parseSingleDate('2026-02-31') !== null) throw new Error('Invalid ISO dates should be rejected');
+    if (parseSingleDate('2/31/2026') !== null) throw new Error('Invalid slash dates should be rejected');
+    recordResult('parseSingleDate: invalid calendar dates', true, 'Impossible dates are rejected');
+  } catch (e) { recordResult('parseSingleDate: invalid calendar dates', false, e.message); }
+
+  try {
     assertEqual(extractDateKey('04/03 - Good Friday'), '04/03', 'extractDateKey for labeled MM/DD');
     assertEqual(extractDateKey('4/5/2026 - Easter'), '04/05', 'extractDateKey for labeled M/D/YYYY');
     assertEqual(extractDateKey('04/12'), '04/12', 'extractDateKey for plain MM/DD');

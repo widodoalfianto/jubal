@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 16px;
+        color: #202124;
+      }
+
+      h2 {
+        margin: 0 0 8px;
+        font-size: 18px;
+      }
+
+      p.helper {
+        margin: 0 0 16px;
+        color: #5f6368;
+        font-size: 13px;
+        line-height: 1.4;
+      }
+
+      label {
+        display: block;
+        margin: 12px 0 6px;
+        font-weight: 600;
+      }
+
+      input,
+      select,
+      textarea {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 8px 10px;
+        border: 1px solid #c7c7c7;
+        border-radius: 6px;
+        font-size: 14px;
+      }
+
+      textarea {
+        min-height: 80px;
+        resize: vertical;
+      }
+
+      .row {
+        display: flex;
+        gap: 12px;
+      }
+
+      .row > div {
+        flex: 1;
+      }
+
+      .checks {
+        display: flex;
+        gap: 16px;
+        margin-top: 14px;
+      }
+
+      .checks label {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 0;
+        font-weight: 500;
+      }
+
+      .checks input[type="checkbox"] {
+        width: auto;
+        margin: 0;
+      }
+
+      .actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 10px;
+        margin-top: 18px;
+      }
+
+      button {
+        border: 0;
+        border-radius: 6px;
+        padding: 10px 14px;
+        font-size: 14px;
+        cursor: pointer;
+      }
+
+      button.primary {
+        background: #1a73e8;
+        color: #fff;
+      }
+
+      button.secondary {
+        background: #f1f3f4;
+        color: #202124;
+      }
+
+      .status {
+        margin-top: 14px;
+        font-size: 13px;
+        line-height: 1.5;
+      }
+
+      .status.error {
+        color: #c5221f;
+      }
+
+      .status.success {
+        color: #137333;
+      }
+    </style>
+  </head>
+  <body>
+    <h2>Add Special Event</h2>
+    <p class="helper">Use this helper instead of typing directly into the sheet. It writes a clean row into <strong>Events</strong> with a consistent date.</p>
+
+    <form id="event-form">
+      <div class="row">
+        <div>
+          <label for="event-date">Date</label>
+          <input id="event-date" name="date" type="date" required>
+        </div>
+        <div>
+          <label for="event-action">Action</label>
+          <select id="event-action" name="action">
+            <option value="ADD">Add event</option>
+            <option value="REMOVE">Remove event</option>
+          </select>
+        </div>
+      </div>
+
+      <label for="event-name">Event Name</label>
+      <input id="event-name" name="event" list="common-events" placeholder="Easter, Christmas, Good Friday, Worship Night" required>
+      <datalist id="common-events"></datalist>
+
+      <label for="recurring-event">Recurring Event</label>
+      <select id="recurring-event" name="recurringEvent">
+        <option value="">None</option>
+      </select>
+
+      <div class="checks">
+        <label><input id="include-in-form" name="includeInForm" type="checkbox" checked> Include in form</label>
+        <label><input id="include-in-schedule" name="includeInSchedule" type="checkbox" checked> Include in schedule</label>
+      </div>
+
+      <label for="event-notes">Notes</label>
+      <textarea id="event-notes" name="notes" placeholder="Optional note for admins"></textarea>
+
+      <div class="actions">
+        <button class="secondary" type="button" onclick="google.script.host.close()">Cancel</button>
+        <button class="primary" id="submit-button" type="submit">Save to Events</button>
+      </div>
+    </form>
+
+    <div id="status" class="status" style="display:none;"></div>
+
+    <script>
+      const context = JSON.parse(<?= dialogContext ?>);
+      const dateInput = document.getElementById('event-date');
+      const commonEvents = document.getElementById('common-events');
+      const recurringSelect = document.getElementById('recurring-event');
+      const form = document.getElementById('event-form');
+      const status = document.getElementById('status');
+      const submitButton = document.getElementById('submit-button');
+
+      dateInput.value = context.today || '';
+
+      (context.commonEvents || []).forEach(value => {
+        const option = document.createElement('option');
+        option.value = value;
+        commonEvents.appendChild(option);
+      });
+
+      (context.recurringEvents || []).forEach(value => {
+        const option = document.createElement('option');
+        option.value = value;
+        option.textContent = value;
+        recurringSelect.appendChild(option);
+      });
+
+      form.addEventListener('submit', event => {
+        event.preventDefault();
+        status.style.display = 'none';
+        status.className = 'status';
+        submitButton.disabled = true;
+
+        const payload = {
+          date: dateInput.value,
+          action: document.getElementById('event-action').value,
+          event: document.getElementById('event-name').value,
+          recurringEvent: recurringSelect.value,
+          includeInForm: document.getElementById('include-in-form').checked,
+          includeInSchedule: document.getElementById('include-in-schedule').checked,
+          notes: document.getElementById('event-notes').value
+        };
+
+        google.script.run
+          .withSuccessHandler(result => {
+            status.style.display = 'block';
+            status.className = 'status success';
+            status.innerHTML = 'Saved <strong>' + result.eventName + '</strong> for ' + result.dateDisplay + '.<br><a href="' + result.sheetUrl + '" target="_blank">Open row in Events</a>';
+            submitButton.disabled = false;
+          })
+          .withFailureHandler(error => {
+            status.style.display = 'block';
+            status.className = 'status error';
+            status.textContent = error && error.message ? error.message : String(error);
+            submitButton.disabled = false;
+          })
+          .addEventFromDialog(payload);
+      });
+    </script>
+  </body>
+</html>

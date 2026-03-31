@@ -138,6 +138,11 @@ Legacy note:
 
 Use the `Events` sheet for one-off additions or removals in a specific month. This is the sheet you edit when “this month is different from normal.”
 
+Best admin workflow:
+- use `Jubal > Add Special Event` from the spreadsheet menu
+- pick the date with the dialog's date field
+- let the script add the row to `Events` for you
+
 Recommended columns:
 - **Enabled**
 - **Date**: click into the cell and use the calendar date picker

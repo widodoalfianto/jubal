@@ -130,14 +130,14 @@ function parseSingleDate(s) {
     const month = parseInt(m[1], 10) - 1;
     const day = parseInt(m[2], 10);
     const year = m[3] ? parseInt(m[3], 10) : new Date().getFullYear();
-    const dt = new Date(year, month, day);
+    const dt = createStrictDate(year, month, day);
     return isNaN(dt.getTime()) ? null : dt;
   }
 
   // Match ISO YYYY-MM-DD
   const iso = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
   if (iso) {
-    const dt = new Date(parseInt(iso[1], 10), parseInt(iso[2], 10) - 1, parseInt(iso[3], 10));
+    const dt = createStrictDate(parseInt(iso[1], 10), parseInt(iso[2], 10) - 1, parseInt(iso[3], 10));
     return isNaN(dt.getTime()) ? null : dt;
   }
 
@@ -329,6 +329,13 @@ function clampDayOfMonthSetting(value, fallback) {
   return parsed;
 }
 
+function createStrictDate(year, monthIndex, dayOfMonth) {
+  const date = new Date(year, monthIndex, dayOfMonth);
+  if (isNaN(date.getTime())) return null;
+  if (date.getFullYear() !== year || date.getMonth() !== monthIndex || date.getDate() !== dayOfMonth) return null;
+  return date;
+}
+
 function isBlankRow(row) {
   return !row || row.every(cell => String(cell === null || cell === undefined ? '' : cell).trim() === '');
 }
@@ -484,6 +491,98 @@ function sendEmailToAdmins(subject, body, settings) {
   if (!recipients) return false;
   MailApp.sendEmail(recipients, subject, body);
   return true;
+}
+
+function onOpen() {
+  SpreadsheetApp.getUi()
+    .createMenu('Jubal')
+    .addItem('Add Special Event', 'showAddEventDialog')
+    .addToUi();
+}
+
+function getAddEventDialogContext() {
+  const runtimeSettings = loadRuntimeSettings();
+  const recurringEvents = getRecurringEventDropdownValues();
+  const commonEvents = ['Good Friday', 'Easter', 'Christmas', 'Christmas Eve', 'Worship Night', 'Prayer Night'];
+  const mergedCommonEvents = commonEvents.concat(recurringEvents).filter((value, index, values) => values.indexOf(value) === index);
+  const today = new Date();
+
+  return {
+    today: Utilities.formatDate(today, runtimeSettings.timeZone || safeGetScriptTimeZone(), 'yyyy-MM-dd'),
+    recurringEvents: recurringEvents,
+    commonEvents: mergedCommonEvents
+  };
+}
+
+function showAddEventDialog() {
+  const template = HtmlService.createTemplateFromFile('AddEventDialog');
+  template.dialogContext = JSON.stringify(getAddEventDialogContext());
+
+  const html = template.evaluate()
+    .setWidth(420)
+    .setHeight(560)
+    .setTitle('Add Special Event');
+
+  SpreadsheetApp.getUi().showModalDialog(html, 'Add Special Event');
+}
+
+function addEventFromDialog(payload) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let eventsSheet = ss.getSheetByName(CONFIG.sheetNames.events);
+
+  if (!eventsSheet || !sheetUsesFriendlyEventsLayout(eventsSheet)) {
+    initializeProject();
+    eventsSheet = ss.getSheetByName(CONFIG.sheetNames.events);
+  }
+
+  if (!eventsSheet || !sheetUsesFriendlyEventsLayout(eventsSheet)) {
+    throw new Error('The Events sheet is not ready yet. Please run initializeProject() and try again.');
+  }
+
+  const action = String((payload && payload.action) || 'ADD').trim().toUpperCase();
+  if (action !== 'ADD' && action !== 'REMOVE') {
+    throw new Error('Please choose whether this event should be added or removed.');
+  }
+
+  const dateValue = String((payload && payload.date) || '').trim();
+  const eventName = String((payload && payload.event) || '').trim();
+  const recurringEvent = String((payload && payload.recurringEvent) || '').trim();
+  const notes = String((payload && payload.notes) || '').trim();
+  const parsedDate = parseSingleDate(dateValue);
+
+  if (!parsedDate) {
+    throw new Error('Please choose a valid event date from the date field.');
+  }
+  if (!eventName) {
+    throw new Error('Please enter an event name.');
+  }
+
+  const row = [
+    true,
+    parsedDate,
+    eventName,
+    action,
+    recurringEvent,
+    parseBooleanLike(payload && payload.includeInForm, true),
+    parseBooleanLike(payload && payload.includeInSchedule, true),
+    notes
+  ];
+
+  eventsSheet.appendRow(row);
+  configureEventsSheetUi(eventsSheet);
+
+  const rowIndex = eventsSheet.getLastRow();
+  const endColumnLetter = columnToLetter(eventsSheet.getLastColumn());
+  const rowRange = eventsSheet.getRange(rowIndex, 1, 1, eventsSheet.getLastColumn());
+  ss.setActiveSheet(eventsSheet);
+  ss.setActiveRange(rowRange);
+
+  return {
+    rowIndex: rowIndex,
+    eventName: eventName,
+    dateDisplay: Utilities.formatDate(parsedDate, safeGetScriptTimeZone(), 'EEE, MMM d, yyyy'),
+    sheetUrl: getSheetRangeUrl(eventsSheet, rowIndex, 'A', endColumnLetter)
+  };
 }
 
 function formatHumanDateTime(value, timeZone) {
@@ -2256,7 +2355,7 @@ function configureEventsSheetUi(sheet) {
   sheet.setFrozenRows(1);
   setHeaderNotes(sheet, [
     'Check this to use the row.',
-    'Click the cell and use the calendar picker. Friendly display format: Mon, Apr 5, 2026.',
+    'Click the cell and use the calendar picker. For the easiest workflow, use Jubal > Add Special Event.',
     'Name shown on the form and schedule for this one-time event.',
     'ADD creates a one-time event. REMOVE cancels one date from the normal schedule.',
     'Optional. Use the same event name as the Recurring sheet when moving or cancelling a recurring event.',
