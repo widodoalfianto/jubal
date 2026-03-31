@@ -32,8 +32,8 @@ To use this workflow for your own ministry, follow these steps:
 
 ### 2. Configuration (`Config.js`)
 Update the `CONFIG` object with your specific details:
-- **`ids.formsFolder`**: The ID of a Google Drive folder where monthly forms will be stored.
-- **`ids.adminEmails`**: Starter admin emails used as a fallback until the `Admins` sheet is set up.
+- **`ids.formsFolder`**: Optional starter folder ID for new installs. Leave blank if each church will set this in `Settings`.
+- **`ids.adminEmails`**: Optional starter admin emails for new installs. Leave blank if each church will manage admins only through the `Admins` sheet.
 - **`roles`**: Starter roles used to seed the `Roles` sheet on first setup.
 
 ### 3. Initialization
@@ -46,7 +46,7 @@ Update the `CONFIG` object with your specific details:
    - `Roles`
    - `Recurring`
    - `Events`
-3. **Important**: Delete the dummy row in "Ministry Members" and add your actual team members.
+3. Add your actual team members to `Ministry Members` before running the first monthly setup.
 4. `initializeProject()` now also tries to switch role entry to checkboxes when it is safe.
    It adds role checkbox columns starting in column `G` and makes the `Roles` column auto-generate from those checkboxes.
 5. If `initializeProject()` skips that migration because columns `G+` already contain data, you can review the sheet and run `migrateMemberRolesToCheckboxes()` manually.
@@ -81,14 +81,6 @@ We welcome contributions! If you're interested in helping improve this project, 
    - Including their personal schedule and the full monthly schedule
 4. 🧹 **Code clean-up and refactoring**
 5. 🔁 **Integrate a CI/CD pipeline** for version control and deployment
-
----
-
-## 📝 Notes
-
-If you'd like to collaborate on the Google Sheets file directly, please email:
-
-📬 **[widodoalfianto94@gmail.com](mailto:widodoalfianto94@gmail.com)** for edit access.
 
 ---
 

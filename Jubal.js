@@ -11,7 +11,6 @@
  * - Auto-fills the bottom portion of the availability matrix based on responses.
  * 
  * - AUTHOR: Alfianto Widodo
- * - If you would like to report any issues with this script, email: widodoalfianto94@gmail.com
  * 
  */
 
@@ -538,6 +537,58 @@ function loadRuntimeSettings() {
   if (!settings.eventsArchiveFrequency) settings.eventsArchiveFrequency = defaults.eventsArchiveFrequency;
 
   return settings;
+}
+
+function getMinistryMemberNames() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const databaseSheet = ss.getSheetByName(CONFIG.sheetNames.ministryMembers);
+  if (!databaseSheet || databaseSheet.getLastRow() < 2) return [];
+
+  const memberColumns = getMinistryMembersColumnMap(databaseSheet);
+  return databaseSheet
+    .getRange(2, memberColumns.name, databaseSheet.getLastRow() - 1, 1)
+    .getDisplayValues()
+    .flat()
+    .map(name => String(name || '').trim())
+    .filter(Boolean);
+}
+
+function getCurrentFormMetadata(metadataSheet) {
+  if (!metadataSheet) return { formName: '', formId: '' };
+
+  const row2FormId = String(metadataSheet.getRange('B2').getValue() || '').trim();
+  if (row2FormId) {
+    return {
+      formName: String(metadataSheet.getRange('A2').getValue() || '').trim(),
+      formId: row2FormId
+    };
+  }
+
+  const row1FormId = String(metadataSheet.getRange('B1').getValue() || '').trim();
+  if (row1FormId && row1FormId.toLowerCase() !== 'form id') {
+    return {
+      formName: String(metadataSheet.getRange('A1').getValue() || '').trim(),
+      formId: row1FormId
+    };
+  }
+
+  return { formName: '', formId: '' };
+}
+
+function writeCurrentFormMetadata(metadataSheet, formName, formId) {
+  if (!metadataSheet) return;
+
+  const current = getCurrentFormMetadata(metadataSheet);
+  metadataSheet.clearContents();
+
+  if (current.formId && current.formId !== String(formId)) {
+    metadataSheet.getRange(1, 1, 1, 2).setValues([[current.formName || 'Previous Form', current.formId]]);
+  }
+
+  metadataSheet.getRange(2, 1, 1, 2).setValues([[formName, String(formId)]]);
+  applySheetTheme(metadataSheet);
+  fitSheetToContent(metadataSheet);
+  applyTableBordersToDataRange(metadataSheet);
 }
 
 function getAdminRecipientList(settings) {
@@ -2092,10 +2143,29 @@ function computeEaster(year) {
   return new Date(year, month, day);
 }
 
-function createNewFormForMonth(month, year, monthName) {
+function sendNewFormCreatedEmail(monthName, responderUrl, editUrl, settings) {
+  const runtimeSettings = settings || loadRuntimeSettings();
+  const emailSubject = `${runtimeSettings.churchName}: New availability form created for ${monthName}`;
+  const emailBody = `Church: ${runtimeSettings.churchName}\n\n` +
+                  "A new Music Ministry Availability Form has been created for the month of " + monthName + ".\n\n" +
+                  "You can access and fill out the form using the following link:\n" + responderUrl + "\n\n" +
+                  "If you need to edit the form, use the following link:\n" + editUrl + "\n\n" +
+                  "Please submit your availability as soon as possible.";
+
+  sendEmailToAdmins(emailSubject, emailBody, runtimeSettings);
+}
+
+function createNewFormForMonth(month, year, monthName, options) {
+  const opts = options || {};
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const metadataSheet = ss.getSheetByName(CONFIG.sheetNames.formMetadata) || ss.insertSheet(CONFIG.sheetNames.formMetadata);
-  const runtimeSettings = loadRuntimeSettings();
+  const runtimeSettings = opts.settings || loadRuntimeSettings();
+  const availabilitySheetName = opts.sheetName || getAvailabilitySheetName(year, month, runtimeSettings);
+  const memberNames = getMinistryMemberNames();
+
+  if (!memberNames.length) {
+    throw new Error(`Cannot create the ${monthName} form because Ministry Members does not have any names yet.`);
+  }
 
   // Create a new form for the upcoming month
   const formTitle = `${runtimeSettings.churchName} Availability - ${monthName}`;
@@ -2103,21 +2173,13 @@ function createNewFormForMonth(month, year, monthName) {
 
   // Name Dropdown (ListItem)
   const nameDropdown = form.addListItem().setTitle(CONFIG.formHeaders.name).setRequired(true);
-  nameDropdown.setChoiceValues(["Loading..."]);
+  nameDropdown.setChoiceValues(memberNames);
 
   const numDropdown = form.addListItem()
   .setTitle(CONFIG.formHeaders.times)
   .setChoiceValues(runtimeSettings.timesChoices) // Set the dropdown options
   .setRequired(true); // Make the question required
   
-  // Add next month's form metadata
-  const lastRow = metadataSheet.getLastRow();
-  metadataSheet.getRange(lastRow + 1, 1).setValue(monthName + " Form");
-  metadataSheet.getRange(lastRow + 1, 2).setValue(form.getId());
-
-  // Update the dropdown with real names
-  updateFormDropdown();
-
   // Add the service dates to the form for unavailable dates selection
   const serviceDates = getServiceDates(year, month);
   const dateChoices = serviceDates;
@@ -2129,24 +2191,14 @@ function createNewFormForMonth(month, year, monthName) {
   // Optional comments section
   form.addTextItem().setTitle(CONFIG.formHeaders.comments).setRequired(false);
 
-  // Link the form responses to a new sheet in the current spreadsheet
-  form.setDestination(FormApp.DestinationType.SPREADSHEET, ss.getId());  // Link the form to the new response sheet
-  console.log("Linked form responses to new sheet");
+  if (!opts.deferDestination) {
+    form.setDestination(FormApp.DestinationType.SPREADSHEET, ss.getId());
+    console.log("Linked form responses to new sheet");
+  }
 
   // Get the links for the edit and responder URLs
   const editUrl = form.getEditUrl(); // Edit link for the form owner
   const responderUrl = form.getPublishedUrl(); // Responder link for the participants
-
-  // Send email notification about the new form
-  const emailSubject = `${runtimeSettings.churchName}: New availability form created for ${monthName}`;
-  const emailBody = `Church: ${runtimeSettings.churchName}\n\n` +
-                  "A new Music Ministry Availability Form has been created for the month of " + monthName + ".\n\n" +
-                  "You can access and fill out the form using the following link:\n" + responderUrl + "\n\n" +
-                  "If you need to edit the form, use the following link:\n" + editUrl + "\n\n" +
-                  "Please submit your availability as soon as possible.";
-
-  // Send email
-  sendEmailToAdmins(emailSubject, emailBody, runtimeSettings);
 
   if (runtimeSettings.formsFolder) {
     try {
@@ -2159,33 +2211,52 @@ function createNewFormForMonth(month, year, monthName) {
   }
 
   // Sync form's date choices with the availability sheet (in case headers were edited)
-  try {
-    const availSheetName = getAvailabilitySheetName(year, month, runtimeSettings);
-    syncFormWithSheet(form.getId(), availSheetName);
-  } catch (err) {
-    console.error('Failed to sync form with sheet after creation: ' + err.message);
+  const syncResult = syncFormWithSheet(form.getId(), availabilitySheetName);
+  if (!syncResult || syncResult.status !== 'synced') {
+    throw new Error(`Failed to sync the new form with "${availabilitySheetName}".`);
   }
+
+  if (!opts.skipMetadata) {
+    writeCurrentFormMetadata(metadataSheet, monthName + " Form", form.getId());
+  }
+
+  if (!opts.skipEmail) {
+    sendNewFormCreatedEmail(monthName, responderUrl, editUrl, runtimeSettings);
+  }
+
+  return {
+    formId: form.getId(),
+    formName: formTitle,
+    metadataLabel: monthName + " Form",
+    editUrl: editUrl,
+    responderUrl: responderUrl,
+    monthName: monthName,
+    syncResult: syncResult
+  };
 }
 
-function updateFormDropdown() {
+function updateFormDropdown(formIdOverride) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const databaseSheet = ss.getSheetByName(CONFIG.sheetNames.ministryMembers);
   const metadataSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG.sheetNames.formMetadata);
 
-  if (!metadataSheet) {
+  if (!formIdOverride && !metadataSheet) {
     console.log("Form Metadata sheet missing.");
-    return;
+    return { status: 'missing_metadata' };
   }
 
-  const formId = metadataSheet.getRange("B2").getValue();
+  const formId = formIdOverride || metadataSheet.getRange("B2").getValue();
   if (!formId) {
     console.log("No Form ID found.");
-    return;
+    return { status: 'missing_form_id' };
   }
 
   // Retrieve the list of names from the "Ministry Members" sheet
-  let names = databaseSheet.getRange("A2:A" + databaseSheet.getLastRow()).getValues();
-  names = names.flat().filter(String); // Flatten the array and remove any empty strings
+  const memberNames = getMinistryMemberNames();
+  if (!memberNames.length) {
+    console.log("No names found in Ministry Members.");
+    return { status: 'no_names' };
+  }
 
   // Open the form using the Form ID
   const form = FormApp.openById(formId);
@@ -2204,10 +2275,16 @@ function updateFormDropdown() {
 
   if (dropdownItem) {
     // Update the dropdown choices
-    dropdownItem.setChoiceValues(names);
+    dropdownItem.setChoiceValues(memberNames);
     console.log("Dropdown updated with names from the sheet.");
+    return {
+      status: 'updated',
+      formId: formId.toString(),
+      choiceCount: memberNames.length
+    };
   } else {
     console.log("Dropdown question not found.");
+    return { status: 'missing_question', formId: formId.toString() };
   }
 }
 
@@ -2522,6 +2599,13 @@ function getTrackedFormIds(metadataSheet) {
     .filter((value, index, arr) => arr.indexOf(value) === index);
 }
 
+function getFormResponseSheetIds(ss) {
+  return (ss || SpreadsheetApp.getActiveSpreadsheet())
+    .getSheets()
+    .filter(sheet => sheet.getName().startsWith("Form Responses"))
+    .map(sheet => sheet.getSheetId());
+}
+
 function unlinkTrackedForms(formIds) {
   (formIds || []).forEach(formId => {
     try {
@@ -2529,6 +2613,27 @@ function unlinkTrackedForms(formIds) {
       console.log("De-linked form with ID: " + formId);
     } catch (e) {
       console.log("Could not de-link or find form " + formId + ": " + e.message);
+    }
+  });
+}
+
+function deleteFormResponseSheetsById(ss, sheetIds) {
+  const spreadsheet = ss || SpreadsheetApp.getActiveSpreadsheet();
+  const targetIds = {};
+  (sheetIds || []).forEach(sheetId => {
+    targetIds[String(sheetId)] = true;
+  });
+
+  spreadsheet.getSheets().forEach(sheet => {
+    if (!sheet.getName().startsWith("Form Responses")) return;
+    if (!Object.prototype.hasOwnProperty.call(targetIds, String(sheet.getSheetId()))) return;
+
+    const toDelete = sheet.getName();
+    try {
+      spreadsheet.deleteSheet(sheet);
+      console.log("Deleted old Form Responses tab: " + toDelete);
+    } catch (e) {
+      console.log("Skipped deleting Form Responses tab '" + toDelete + "': " + e.message);
     }
   });
 }
@@ -3707,6 +3812,52 @@ function clearByHeader(header) {
   console.log(header + ' column cleared.');
 }
 
+function cleanupPreparedMonthlyArtifacts(ss, stagingSheetName, preparedFormId, existingResponseSheetIds) {
+  const spreadsheet = ss || SpreadsheetApp.getActiveSpreadsheet();
+
+  if (preparedFormId) {
+    try {
+      FormApp.openById(preparedFormId).removeDestination();
+    } catch (unlinkError) {
+      console.log('Could not remove destination from staged form ' + preparedFormId + ': ' + unlinkError.message);
+    }
+
+    try {
+      DriveApp.getFileById(preparedFormId).setTrashed(true);
+      console.log('Deleted staged form ' + preparedFormId);
+    } catch (trashError) {
+      console.log('Could not delete staged form ' + preparedFormId + ': ' + trashError.message);
+    }
+  }
+
+  const existingIds = {};
+  (existingResponseSheetIds || []).forEach(sheetId => {
+    existingIds[String(sheetId)] = true;
+  });
+
+  spreadsheet.getSheets().forEach(sheet => {
+    if (!sheet.getName().startsWith("Form Responses")) return;
+    if (Object.prototype.hasOwnProperty.call(existingIds, String(sheet.getSheetId()))) return;
+
+    try {
+      spreadsheet.deleteSheet(sheet);
+      console.log("Deleted staged Form Responses tab: " + sheet.getName());
+    } catch (error) {
+      console.log("Could not delete staged Form Responses tab '" + sheet.getName() + "': " + error.message);
+    }
+  });
+
+  const stagingSheet = stagingSheetName ? spreadsheet.getSheetByName(stagingSheetName) : null;
+  if (stagingSheet) {
+    try {
+      spreadsheet.deleteSheet(stagingSheet);
+      console.log("Deleted staging tab: " + stagingSheetName);
+    } catch (error) {
+      console.log("Could not delete staging tab '" + stagingSheetName + "': " + error.message);
+    }
+  }
+}
+
 function runMonthlySetupInternal(options) {
   const opts = options || {};
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -3714,6 +3865,7 @@ function runMonthlySetupInternal(options) {
   const metadataSheet = ss.getSheetByName("Form Metadata") || ss.insertSheet("Form Metadata");
   const runtimeSettings = loadRuntimeSettings();
   const trackedFormIds = getTrackedFormIds(metadataSheet);
+  const existingResponseSheetIds = getFormResponseSheetIds(ss);
   const today = opts.referenceDate ? new Date(opts.referenceDate) : new Date();
   const propertyKey = getMonthlySetupPropertyKey(today);
   const props = PropertiesService.getScriptProperties();
@@ -3762,40 +3914,72 @@ function runMonthlySetupInternal(options) {
 
   const newTabName = getAvailabilitySheetNameForMonthName(planMonthName, runtimeSettings);
   const deleteTabName = getAvailabilitySheetNameForMonthName(oldMonthName, runtimeSettings);
-  setupAvailability(newTabName, planYear, planMonth);
+  const stagingSheetName = `${newTabName} (Staging)`;
+  let preparedForm = null;
+  let setupCommitted = false;
 
-  clearByHeader(CONFIG.sheetHeaders.times);
-  clearByHeader(CONFIG.sheetHeaders.dates);
-  clearByHeader(CONFIG.sheetHeaders.comments);
-
-  if (!ss.getSheetByName(newTabName)) {
-    ss.insertSheet(newTabName);
-    console.log("Created new tab: " + newTabName);
+  if (!opts.force && ss.getSheetByName(newTabName)) {
+    throw new Error(`The ${newTabName} sheet already exists. Please review it before running monthlySetup again.`);
   }
 
-  const oldSheet = ss.getSheetByName(deleteTabName);
-  if (oldSheet) {
-    ss.deleteSheet(oldSheet);
-    console.log("Deleted old tab: " + deleteTabName);
+  if (ss.getSheetByName(stagingSheetName)) {
+    ss.deleteSheet(ss.getSheetByName(stagingSheetName));
   }
 
-  // Store the form ID in the "Form Metadata" sheet in the specified structure
-  // Clear any old form metadata if we have more than 2 entries
-  const lastRow = metadataSheet.getLastRow();
-  if (lastRow > 1) {
-    const currentMonthFormLabel = metadataSheet.getRange(2, 1).getValue();  // Get the current month's form label
-    const currentMonthFormId = metadataSheet.getRange(2, 2).getValue();  // Get the current month's form ID
+  try {
+    setupAvailability(stagingSheetName, planYear, planMonth);
 
-    // Move the current month's form metadata to row 1
-    metadataSheet.getRange(1, 1).setValue(currentMonthFormLabel);  // Move label to row 1
-    metadataSheet.getRange(1, 2).setValue(currentMonthFormId);  // Move form ID to row 1
-    metadataSheet.deleteRow(2);
+    preparedForm = createNewFormForMonth(planMonth, planYear, planMonthName, {
+      settings: runtimeSettings,
+      sheetName: stagingSheetName,
+      skipMetadata: true,
+      skipEmail: true,
+      deferDestination: true
+    });
+
+    FormApp.openById(preparedForm.formId).setDestination(FormApp.DestinationType.SPREADSHEET, ss.getId());
+    console.log("Linked staged form responses to spreadsheet");
+
+    const existingNewTab = ss.getSheetByName(newTabName);
+    if (existingNewTab) {
+      ss.deleteSheet(existingNewTab);
+      console.log("Replaced existing tab: " + newTabName);
+    }
+
+    const stagingSheet = ss.getSheetByName(stagingSheetName);
+    if (!stagingSheet) {
+      throw new Error("Staging availability tab was not found during monthly setup.");
+    }
+    stagingSheet.setName(newTabName);
+
+    clearByHeader(CONFIG.sheetHeaders.times);
+    clearByHeader(CONFIG.sheetHeaders.dates);
+    clearByHeader(CONFIG.sheetHeaders.comments);
+
+    writeCurrentFormMetadata(metadataSheet, preparedForm.metadataLabel, preparedForm.formId);
+
+    unlinkTrackedForms(trackedFormIds);
+    deleteFormResponseSheetsById(ss, existingResponseSheetIds);
+
+    const oldSheet = ss.getSheetByName(deleteTabName);
+    if (oldSheet) {
+      ss.deleteSheet(oldSheet);
+      console.log("Deleted old tab: " + deleteTabName);
+    }
+
+    setupCommitted = true;
+  } catch (error) {
+    if (!setupCommitted) {
+      cleanupPreparedMonthlyArtifacts(ss, stagingSheetName, preparedForm ? preparedForm.formId : '', existingResponseSheetIds);
+    }
+    throw error;
   }
 
-  unlinkTrackedForms(trackedFormIds);
-  deleteFormResponseSheets(ss);
-
-  createNewFormForMonth(planMonth, planYear, planMonthName);
+  try {
+    sendNewFormCreatedEmail(planMonthName, preparedForm.responderUrl, preparedForm.editUrl, runtimeSettings);
+  } catch (error) {
+    console.error('Failed to send new form email: ' + error.message);
+  }
   console.log(`Created new form for ${planMonthName}`);
 
   // Legacy support: populate automatic events only for old-style Events/Monthly Events sheets.
@@ -4011,11 +4195,8 @@ function initializeProject() {
     const headers = getMinistryMembersHeaderRow().concat([CONFIG.sheetHeaders.canonicalName]);
     dbSheet.appendRow(headers);
     dbSheet.getRange(1, 1, 1, headers.length).setFontWeight("bold");
-    
-    // Add Dummy Data
-    const dummyRow = ["John Doe", "", "4", "Excited to serve!", "WL, ACOUSTIC", normalizeName("John Doe")];
-    dbSheet.appendRow(dummyRow);
-    console.log("Created Ministry Members sheet with dummy data.");
+
+    console.log("Created Ministry Members sheet.");
   }
 
   ensureMinistryMembersLayout(dbSheet);

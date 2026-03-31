@@ -4,8 +4,8 @@
  */
 const CONFIG = {
   ids: {
-    formsFolder: "1RMITTfCVaYzc0RBBtF0caE8RI5yeq57d",
-    adminEmails: ["widodoalfianto94@gmail.com"]
+    formsFolder: "",
+    adminEmails: []
   },
   sheetNames: {
     ministryMembers: "Ministry Members",

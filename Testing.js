@@ -10,6 +10,7 @@
 function runFullSystemTest() {
   console.log("🧪 STARTING FULL SYSTEM TEST");
   const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const seededMemberName = "Existing Test Member";
 
   // --- Step 1: Initial Setup ---
   console.log("\n--- Step 1: Initial Setup ---");
@@ -19,6 +20,7 @@ function runFullSystemTest() {
   // Verify sheets exist
   if (!ss.getSheetByName(CONFIG.sheetNames.ministryMembers)) throw new Error("Ministry Members sheet missing");
   if (!ss.getSheetByName(CONFIG.sheetNames.formMetadata)) throw new Error("Form Metadata sheet missing");
+  ensureTestMemberExists(seededMemberName, loadRuntimeSettings().roles[0]);
   console.log("✅ Initial setup verified");
 
   // --- Step 2: Monthly Setup ---
@@ -146,24 +148,24 @@ function runFullSystemTest() {
   console.log("\n🎉 FULL SYSTEM TEST PASSED");
   
   // --- Step 5: Cleanup ---
-  cleanupTestArtifacts(ss, testName, availabilitySheetName, planMonthName);
+  cleanupTestArtifacts(ss, testName, availabilitySheetName, planMonthName, [seededMemberName]);
 }
 
 /**
  * Cleans up test data to leave the spreadsheet in a clean state.
  */
-function cleanupTestArtifacts(ss, testName, createdSheetName, monthName) {
+function cleanupTestArtifacts(ss, testName, createdSheetName, monthName, additionalMemberNames) {
   console.log("\n--- Step 5: Cleanup ---");
   
   // 1. Remove the test user from the database
   const dbSheet = ss.getSheetByName(CONFIG.sheetNames.ministryMembers);
   const dbData = dbSheet.getDataRange().getValues();
+  const namesToDelete = [testName].concat(additionalMemberNames || []);
   
   for (let i = dbData.length - 1; i >= 0; i--) {
-    if (dbData[i][0] === testName) {
+    if (namesToDelete.indexOf(dbData[i][0]) !== -1) {
       dbSheet.deleteRow(i + 1);
-      console.log(`✅ Deleted test user '${testName}' from database.`);
-      break;
+      console.log(`✅ Deleted test user '${dbData[i][0]}' from database.`);
     }
   }
   
@@ -664,6 +666,9 @@ function runIntegrationTests() {
     if (!dbSheet || dbSheet.getRange(1, memberColumns.canonicalName).getValue() !== CONFIG.sheetHeaders.canonicalName) {
       throw new Error('Canonical Name header missing from Ministry Members');
     }
+    if (dbSheet.getLastRow() !== 1) {
+      throw new Error('initializeProject should not seed a dummy ministry member row');
+    }
     if (memberColumns.canonicalName !== dbSheet.getLastColumn()) {
       throw new Error('Canonical Name should be the last column in Ministry Members');
     }
@@ -686,9 +691,6 @@ function runIntegrationTests() {
     if (dbSheet.getRange(2, memberColumns.canonicalName).getDataValidation() !== null) {
       throw new Error('Canonical Name column should not keep checkbox validation');
     }
-    if (!dbSheet.getRange(2, memberColumns.roles).getFormula()) {
-      throw new Error('Roles formula was not created in Ministry Members');
-    }
     if (settingsValues.indexOf('events_archive_frequency') === -1) {
       throw new Error('Archive settings were not created in Settings');
     }
@@ -704,6 +706,9 @@ function runIntegrationTests() {
     if (adminsSheet.getRange(1, 1, 1, 3).getDisplayValues()[0].join('|') !== 'Enabled|Email|Notes') {
       throw new Error('Admins sheet headers should normalize to Enabled, Email, Notes');
     }
+    if (String(adminsSheet.getRange(2, 2).getDisplayValue() || '').trim() !== '') {
+      throw new Error('Fresh setup should not seed a real admin email into the Admins sheet');
+    }
     if (!sheetUsesFriendlyRolesLayout(rolesSheet)) {
       throw new Error('Roles sheet does not use the friendly role layout');
     }
@@ -712,6 +717,37 @@ function runIntegrationTests() {
     }
     recordResult('initializeProject:configSheets', true, 'Configuration sheets created');
   } catch (e) { recordResult('initializeProject:configSheets', false, e.message); }
+
+  try {
+    const referenceDate = new Date(2026, 2, 30);
+    const planningContext = getPlanningMonthContext(referenceDate, loadRuntimeSettings());
+    const dbSheet = ss.getSheetByName(CONFIG.sheetNames.ministryMembers);
+    if (dbSheet.getLastRow() > 1) {
+      dbSheet.getRange(2, 1, dbSheet.getLastRow() - 1, dbSheet.getLastColumn()).clearContent();
+    }
+
+    let failedAsExpected = false;
+    try {
+      runMonthlySetupInternal({ force: true, referenceDate: referenceDate });
+    } catch (error) {
+      failedAsExpected = error.message.indexOf('does not have any names yet') !== -1;
+    }
+
+    if (!failedAsExpected) {
+      throw new Error('monthlySetup should fail cleanly when Ministry Members has no names');
+    }
+    if (ss.getSheetByName(planningContext.sheetName)) {
+      throw new Error('monthlySetup should clean up the staged availability sheet when form creation fails');
+    }
+    if (ss.getSheetByName(planningContext.sheetName + ' (Staging)')) {
+      throw new Error('monthlySetup should remove the staging availability sheet after a failure');
+    }
+    if (getTrackedFormIds(ss.getSheetByName(CONFIG.sheetNames.formMetadata)).length) {
+      throw new Error('Failed monthlySetup should not commit a new form into Form Metadata');
+    }
+
+    recordResult('monthlySetup:noMembersFailure', true, 'monthlySetup fails safely when the roster is empty');
+  } catch (e) { recordResult('monthlySetup:noMembersFailure', false, e.message); }
 
   try {
     const result = migrateMemberRolesToCheckboxes();
@@ -740,6 +776,7 @@ function runIntegrationTests() {
     replaceSheetContents(CONFIG.sheetNames.recurring, getDefaultRecurringSheetRows());
     replaceSheetContents(CONFIG.sheetNames.events, getDefaultEventsSheetRows());
     deleteSheetIfExists(CONFIG.sheetNames.monthlyEvents);
+    ensureTestMemberExists('Monthly Setup Smoke Test', 'WL');
     runMonthlySetupNow();
     recordResult('monthlySetup:smoke', true, 'runMonthlySetupNow executed');
   } catch (e) { recordResult('monthlySetup:smoke', false, e.message); }
@@ -838,6 +875,37 @@ function deleteSheetIfExists(sheetName) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName(sheetName);
   if (sheet) ss.deleteSheet(sheet);
+}
+
+function ensureTestMemberExists(name, role) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(CONFIG.sheetNames.ministryMembers);
+  if (!sheet) throw new Error('Ministry Members sheet missing');
+
+  const memberColumns = getMinistryMembersColumnMap(sheet);
+  const existingNames = sheet.getLastRow() >= 2
+    ? sheet.getRange(2, memberColumns.name, sheet.getLastRow() - 1, 1).getDisplayValues().flat().map(value => String(value || '').trim())
+    : [];
+
+  const existingIndex = existingNames.indexOf(name);
+  if (existingIndex !== -1) return existingIndex + 2;
+
+  const width = Math.max(sheet.getLastColumn(), memberColumns.canonicalName);
+  const row = Array(width).fill('');
+  row[memberColumns.name - 1] = name;
+  row[memberColumns.times - 1] = '4';
+  row[memberColumns.comments - 1] = 'Seeded test member';
+  row[memberColumns.canonicalName - 1] = normalizeName(name);
+  sheet.appendRow(row);
+
+  const rowNumber = sheet.getLastRow();
+  const roleColumnMap = getConfiguredMemberRoleColumnMap(sheet);
+  const roleColumn = roleColumnMap[String(role || '').trim().toUpperCase()];
+  if (roleColumn) {
+    sheet.getRange(rowNumber, roleColumn).setValue(true);
+  }
+  ensureRolesFormulaForRow(sheet, rowNumber, loadRuntimeSettings().roles);
+  return rowNumber;
 }
 
 function getDefaultSettingsSheetRows() {
