@@ -644,6 +644,9 @@ function runIntegrationTests() {
     if (!eventsSheet) {
       throw new Error('Events sheet missing');
     }
+    if (eventsSheet.getRange(2, 10).getDisplayValue() !== 'How to Add Events') {
+      throw new Error('Events sheet should include the visible instruction banner');
+    }
     const recurringHeaders = recurringSheet.getRange(1, 1, 1, recurringSheet.getLastColumn()).getDisplayValues()[0];
     if (recurringHeaders.indexOf('Month') !== -1 || recurringHeaders.indexOf('Day') !== -1) {
       throw new Error('Recurring should use the simplified weekly/monthly layout without Month or Day columns');

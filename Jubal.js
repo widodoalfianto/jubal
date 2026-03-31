@@ -2419,6 +2419,51 @@ function configureRecurringSheetUi(sheet) {
   applyTableBordersToDataRange(sheet);
 }
 
+function renderEventsInstructionBanner(sheet) {
+  if (!sheet) return;
+
+  const startColumn = 10; // J
+  const width = 5; // J:N
+  const titleRow = 2;
+  const bodyRow = 3;
+  const bodyHeight = 3;
+  const lastNeededColumn = startColumn + width - 1;
+
+  if (sheet.getMaxColumns() < lastNeededColumn) {
+    sheet.insertColumnsAfter(sheet.getMaxColumns(), lastNeededColumn - sheet.getMaxColumns());
+  }
+
+  const titleRange = sheet.getRange(titleRow, startColumn, 1, width);
+  const bodyRange = sheet.getRange(bodyRow, startColumn, bodyHeight, width);
+
+  titleRange.breakApart().clearContent().clearFormat();
+  bodyRange.breakApart().clearContent().clearFormat();
+
+  titleRange
+    .merge()
+    .setValue('How to Add Events')
+    .setFontWeight('bold')
+    .setFontColor('#1f1f1f')
+    .setBackground('#d9ead3')
+    .setHorizontalAlignment('left');
+
+  bodyRange
+    .merge()
+    .setValue(
+      'Use the Add Special Event option in the spreadsheet menu.\n' +
+      'If you edit directly in this sheet, double-click a Date cell to open the calendar.\n' +
+      'Use ADD for one-time events and REMOVE to skip one recurring date.'
+    )
+    .setBackground('#f3f8ee')
+    .setFontColor('#1f1f1f')
+    .setVerticalAlignment('top')
+    .setHorizontalAlignment('left')
+    .setWrap(true);
+
+  applyTableBorder(sheet, titleRow, startColumn, 1, width);
+  applyTableBorder(sheet, bodyRow, startColumn, bodyHeight, width);
+}
+
 function configureEventsSheetUi(sheet) {
   if (!sheet) return;
   const maxRows = Math.max(sheet.getMaxRows() - 1, 1);
@@ -2448,7 +2493,8 @@ function configureEventsSheetUi(sheet) {
   sheet.getRange(2, 2, maxRows, 1).setBackground('#eef4ff');
   highlightExampleRows(sheet, 8);
   fitSheetToContent(sheet);
-  applyTableBordersToDataRange(sheet);
+  applyTableBorder(sheet, 1, 1, sheet.getLastRow(), 8);
+  renderEventsInstructionBanner(sheet);
 }
 
 function getAdminsSeedRows(emails) {
