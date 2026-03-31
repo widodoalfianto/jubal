@@ -502,7 +502,8 @@ function getAdminsSeedRows(emails) {
   const adminEmails = normalizeEmailList(emails && emails.length ? emails : CONFIG.ids.adminEmails);
   const starterEmails = normalizeEmailList(CONFIG.ids.adminEmails || []);
   const rows = [
-    ['Enabled', 'Email', 'Notes']
+    ['Enabled', 'Email', 'Notes'],
+    [false, 'admin@example.com', 'Example row']
   ];
 
   if (adminEmails.length) {
@@ -517,7 +518,6 @@ function getAdminsSeedRows(emails) {
     rows.push([true, '', 'Enter the first admin email here.']);
   }
 
-  rows.push([false, 'admin@example.com', 'Example row']);
   return rows;
 }
 
