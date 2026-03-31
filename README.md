@@ -167,7 +167,10 @@ Admin workflows:
   - one `REMOVE` row for the original date
   - one `ADD` row for the new date
 - To add special events (Good Friday, retreat nights, Christmas Eve), add rows in `Events` for the relevant dates.
-- After editing the Availability sheet header manually, run `syncCurrentFormWithAvailability()` from the Apps Script editor to update the live form's date choices.
+- After changing `Events` after next month has already been generated, use the `Scheduling` menu in the spreadsheet:
+  - `Apply Event Changes to Next Month` rebuilds next month's sheet from `Recurring` and `Events`
+  - `Refresh Form Dates` updates the live form choices from the sheet
+  - `Refresh Availability Sheet` rebuilds the availability list from `Ministry Members`
 
 ## Admins
 

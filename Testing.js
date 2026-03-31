@@ -739,6 +739,53 @@ function runIntegrationTests() {
     runMonthlySetupNow();
     recordResult('monthlySetup:smoke', true, 'runMonthlySetupNow executed');
   } catch (e) { recordResult('monthlySetup:smoke', false, e.message); }
+
+  // test: applying event changes refreshes the next month sheet without losing same-date schedule assignments
+  try {
+    replaceSheetContents(CONFIG.sheetNames.settings, getDefaultSettingsSheetRows());
+    replaceSheetContents(CONFIG.sheetNames.rolesConfig, getDefaultRolesSheetRows());
+    replaceSheetContents(CONFIG.sheetNames.recurring, getDefaultRecurringSheetRows());
+    replaceSheetContents(CONFIG.sheetNames.events, getDefaultEventsSheetRows());
+
+    const referenceDate = new Date(2026, 2, 30); // March 30, 2026 -> April 2026 planning month
+    const planningContext = getPlanningMonthContext(referenceDate, loadRuntimeSettings());
+    setupAvailability(planningContext.sheetName, planningContext.planYear, planningContext.planMonth);
+
+    const availabilitySheet = ss.getSheetByName(planningContext.sheetName);
+    availabilitySheet.getRange(2, 2).setValue('Leader A');
+
+    const eventRows = getDefaultEventsSheetRows().map(row => row.slice());
+    eventRows.forEach(row => {
+      if (row[2] === 'Easter') row[0] = true;
+    });
+    replaceSheetContents(CONFIG.sheetNames.events, eventRows);
+    configureEventsSheetUi(ss.getSheetByName(CONFIG.sheetNames.events));
+
+    const result = applyEventChangesToPlanningMonth({
+      referenceDate: referenceDate,
+      skipFormSync: true,
+      skipMatrixRefresh: true
+    });
+
+    const refreshedSheet = ss.getSheetByName(planningContext.sheetName);
+    const refreshedHeader = refreshedSheet.getRange(1, 2).getDisplayValue();
+    const preservedValue = refreshedSheet.getRange(2, 2).getDisplayValue();
+
+    if (refreshedHeader.indexOf('04/05 - Easter') === -1) {
+      throw new Error('Expected Easter label to be applied to the April 5 header');
+    }
+    if (preservedValue !== 'Leader A') {
+      throw new Error(`Expected existing schedule assignment to be preserved, found '${preservedValue}'`);
+    }
+    if (result.restoredAssignments !== 1) {
+      throw new Error('Expected exactly one preserved schedule assignment');
+    }
+    if (result.addedDates.length !== 0 || result.removedDates.length !== 0) {
+      throw new Error('Relabeling an existing date should not be treated as an added or removed date');
+    }
+
+    recordResult('applyEventChangesToPlanningMonth:preserveAssignments', true, JSON.stringify(result));
+  } catch (e) { recordResult('applyEventChangesToPlanningMonth:preserveAssignments', false, e.message); }
 }
 
 function resetTestResultsSheet() {

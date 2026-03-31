@@ -566,8 +566,12 @@ function onOpen() {
   }
 
   SpreadsheetApp.getUi()
-    .createMenu('Jubal')
+    .createMenu('Scheduling')
     .addItem('Add Special Event', 'showAddEventDialog')
+    .addSeparator()
+    .addItem('Apply Event Changes to Next Month', 'menuApplyEventChangesToPlanningMonth')
+    .addItem('Refresh Form Dates', 'menuSyncCurrentFormWithAvailability')
+    .addItem('Refresh Availability Sheet', 'menuUpdateAvailability')
     .addToUi();
 }
 
@@ -654,6 +658,190 @@ function addEventFromDialog(payload) {
     dateDisplay: Utilities.formatDate(parsedDate, safeGetScriptTimeZone(), 'EEE, MMM d, yyyy'),
     sheetUrl: getSheetRangeUrl(eventsSheet, rowIndex, 'A', endColumnLetter)
   };
+}
+
+function getPlanningMonthContext(referenceDate, settings) {
+  const runtimeSettings = settings || loadRuntimeSettings();
+  const baseDate = referenceDate ? new Date(referenceDate) : new Date();
+  const planDate = new Date(baseDate);
+  const timeZone = runtimeSettings.timeZone || safeGetScriptTimeZone();
+  planDate.setMonth(baseDate.getMonth() + 1);
+
+  return {
+    referenceDate: baseDate,
+    planDate: planDate,
+    planYear: planDate.getFullYear(),
+    planMonth: planDate.getMonth(),
+    planMonthName: Utilities.formatDate(planDate, timeZone, 'MMMM'),
+    sheetName: getAvailabilitySheetName(planDate.getFullYear(), planDate.getMonth(), runtimeSettings),
+    timeZone: timeZone
+  };
+}
+
+function captureScheduleAssignments(sheet, roles) {
+  const assignments = {};
+  if (!sheet || !roles || !roles.length || sheet.getLastRow() < 2 || sheet.getLastColumn() <= 1) return assignments;
+
+  const headers = sheet.getRange(CONFIG.layout.dateRowIndex, 2, 1, sheet.getLastColumn() - 1).getDisplayValues()[0];
+  const rowCount = Math.min(roles.length, Math.max(sheet.getLastRow() - 1, 0));
+  if (rowCount <= 0) return assignments;
+
+  const rows = sheet.getRange(2, 1, rowCount, sheet.getLastColumn()).getDisplayValues();
+  rows.forEach((row, rowIndex) => {
+    const roleName = String(row[0] || roles[rowIndex] || '').trim().toUpperCase();
+    if (!roleName) return;
+
+    headers.forEach((header, columnIndex) => {
+      const dateKey = extractDateKey(header);
+      const value = String(row[columnIndex + 1] || '').trim();
+      if (!dateKey || !value) return;
+      assignments[`${roleName}|${dateKey}`] = value;
+    });
+  });
+
+  return assignments;
+}
+
+function restoreScheduleAssignments(sheet, assignments, roles) {
+  if (!sheet || !roles || !roles.length || !assignments || !Object.keys(assignments).length || sheet.getLastRow() < 2 || sheet.getLastColumn() <= 1) {
+    return 0;
+  }
+
+  const rowCount = Math.min(roles.length, Math.max(sheet.getLastRow() - 1, 0));
+  if (rowCount <= 0) return 0;
+
+  const headers = sheet.getRange(CONFIG.layout.dateRowIndex, 2, 1, sheet.getLastColumn() - 1).getDisplayValues()[0];
+  const rows = sheet.getRange(2, 1, rowCount, sheet.getLastColumn()).getValues();
+  let restoredCount = 0;
+
+  rows.forEach((row, rowIndex) => {
+    const roleName = String(row[0] || roles[rowIndex] || '').trim().toUpperCase();
+    if (!roleName) return;
+
+    headers.forEach((header, columnIndex) => {
+      const dateKey = extractDateKey(header);
+      if (!dateKey) return;
+      const preservedValue = assignments[`${roleName}|${dateKey}`];
+      if (!preservedValue) return;
+      row[columnIndex + 1] = preservedValue;
+      restoredCount++;
+    });
+  });
+
+  sheet.getRange(2, 1, rowCount, sheet.getLastColumn()).setValues(rows);
+  return restoredCount;
+}
+
+function buildMenuAlertLines(result) {
+  if (!result) return ['The action finished without returning details.'];
+
+  switch (result.status) {
+    case 'missing_sheet':
+      return [
+        `Next month has not been generated yet.`,
+        `The sheet "${result.sheetName}" does not exist yet. Run the normal monthly setup first, then use this action for later date changes.`
+      ];
+    case 'missing_metadata':
+      return [
+        'The Form Metadata sheet was not found.',
+        'The workbook was updated, but the form could not be refreshed automatically.'
+      ];
+    case 'missing_form_id':
+      return [
+        'No current form was found in Form Metadata.',
+        'The workbook was updated, but the form dates could not be refreshed automatically.'
+      ];
+    case 'missing_dates_question':
+      return [
+        'The current form does not have the unavailable-dates question.',
+        'Please check the form structure before trying again.'
+      ];
+    case 'missing_database':
+      return [
+        'The Ministry Members sheet was not found.',
+        'Please run initializeProject() or restore the sheet before trying again.'
+      ];
+    case 'updated':
+      return [
+        `Updated the availability list in "${result.sheetName}".`,
+        `${result.dateCount || 0} date column(s) and ${result.roleCount || 0} role row(s) were refreshed.`
+      ];
+    case 'synced':
+      return [
+        `Updated the date choices in the current form from "${result.sheetName}".`,
+        `${result.choiceCount || 0} date choice(s) are now on the form.`
+      ];
+    case 'completed': {
+      const lines = [
+        `Updated "${result.sheetName}" from Recurring and Events.`,
+        `Preserved ${result.restoredAssignments || 0} scheduled cell(s) for dates that still exist.`
+      ];
+
+      if (result.formSync) {
+        if (result.formSync.status === 'synced') {
+          lines.push(`Refreshed the current form with ${result.formSync.choiceCount || 0} date choice(s).`);
+        } else if (result.formSync.status !== 'skipped') {
+          lines.push(`The workbook was updated, but the form could not be refreshed automatically.`);
+        }
+      }
+
+      if (result.availabilityUpdate && result.availabilityUpdate.status === 'updated') {
+        lines.push(`Refreshed the availability section for ${result.availabilityUpdate.roleCount || 0} role row(s).`);
+      }
+
+      if (result.addedDates && result.addedDates.length) {
+        lines.push(`New dates added: ${result.addedDates.join(', ')}. Ask members to confirm availability for these new dates.`);
+      }
+      if (result.removedDates && result.removedDates.length) {
+        lines.push(`Removed dates: ${result.removedDates.join(', ')}.`);
+      }
+
+      return lines;
+    }
+    default:
+      return [String(result.message || 'The action finished.')];
+  }
+}
+
+function showMenuAlert(title, result) {
+  const ui = SpreadsheetApp.getUi();
+  ui.alert(title, buildMenuAlertLines(result).join('\n\n'), ui.ButtonSet.OK);
+}
+
+function menuSyncCurrentFormWithAvailability() {
+  const ui = SpreadsheetApp.getUi();
+  try {
+    const result = syncCurrentFormWithAvailability();
+    showMenuAlert('Form Dates Refreshed', result);
+    return result;
+  } catch (error) {
+    ui.alert('Could Not Refresh Form Dates', error.message, ui.ButtonSet.OK);
+    throw error;
+  }
+}
+
+function menuUpdateAvailability() {
+  const ui = SpreadsheetApp.getUi();
+  try {
+    const result = updateAvailability();
+    showMenuAlert('Availability Sheet Refreshed', result);
+    return result;
+  } catch (error) {
+    ui.alert('Could Not Refresh Availability Sheet', error.message, ui.ButtonSet.OK);
+    throw error;
+  }
+}
+
+function menuApplyEventChangesToPlanningMonth() {
+  const ui = SpreadsheetApp.getUi();
+  try {
+    const result = applyEventChangesToPlanningMonth();
+    showMenuAlert('Next Month Updated', result);
+    return result;
+  } catch (error) {
+    ui.alert('Could Not Apply Event Changes', error.message, ui.ButtonSet.OK);
+    throw error;
+  }
 }
 
 function formatHumanDateTime(value, timeZone) {
@@ -2035,13 +2223,13 @@ function syncFormWithSheet(formId, sheetName) {
   const sheet = ss.getSheetByName(sheetName);
   if (!sheet) {
     console.log('syncFormWithSheet: sheet not found: ' + sheetName);
-    return;
+    return { status: 'missing_sheet', sheetName: sheetName };
   }
 
   const lastCol = sheet.getLastColumn();
   if (lastCol <= 1) {
     console.log('syncFormWithSheet: no date columns in sheet');
-    return;
+    return { status: 'missing_date_columns', sheetName: sheetName };
   }
 
   const dateHeaders = sheet.getRange(CONFIG.layout.dateRowIndex, 2, 1, lastCol - 1).getDisplayValues()[0].map(h => String(h).trim()).filter(Boolean);
@@ -2049,7 +2237,7 @@ function syncFormWithSheet(formId, sheetName) {
 
   if (!normalizedHeaders.length) {
     console.log('syncFormWithSheet: no date headers found');
-    return;
+    return { status: 'missing_date_headers', sheetName: sheetName };
   }
 
   const form = FormApp.openById(formId);
@@ -2064,30 +2252,92 @@ function syncFormWithSheet(formId, sheetName) {
 
   if (!target) {
     console.log('syncFormWithSheet: checkbox item for dates not found in form');
-    return;
+    return { status: 'missing_dates_question', sheetName: sheetName, formId: formId };
   }
 
   const choices = normalizedHeaders.map(d => target.createChoice(d));
   target.setChoices(choices);
   console.log('syncFormWithSheet: updated form choices from sheet ' + sheetName);
+  return {
+    status: 'synced',
+    sheetName: sheetName,
+    formId: formId,
+    choiceCount: normalizedHeaders.length
+  };
 }
 
 /**
  * Convenience wrapper: sync the current open form (from metadata) with the planned availability sheet for next month.
  */
-function syncCurrentFormWithAvailability() {
+function syncCurrentFormWithAvailability(referenceDate) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const meta = ss.getSheetByName(CONFIG.sheetNames.formMetadata);
-  if (!meta) { console.log('No metadata sheet'); return; }
+  if (!meta) {
+    console.log('No metadata sheet');
+    return { status: 'missing_metadata' };
+  }
   const formId = meta.getRange('B2').getValue() || meta.getRange('B1').getValue();
-  if (!formId) { console.log('No form id in metadata'); return; }
+  if (!formId) {
+    console.log('No form id in metadata');
+    return { status: 'missing_form_id' };
+  }
 
-  const today = new Date();
-  const planDate = new Date(today);
-  planDate.setMonth(today.getMonth() + 1);
-  const planMonthName = planDate.toLocaleString('default', { month: 'long' });
-  const sheetName = getAvailabilitySheetNameForMonthName(planMonthName);
-  syncFormWithSheet(formId.toString(), sheetName);
+  const context = getPlanningMonthContext(referenceDate);
+  return syncFormWithSheet(formId.toString(), context.sheetName);
+}
+
+function applyEventChangesToPlanningMonth(options) {
+  const opts = options || {};
+  const runtimeSettings = loadRuntimeSettings();
+  const context = getPlanningMonthContext(opts.referenceDate, runtimeSettings);
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const existingSheet = ss.getSheetByName(context.sheetName);
+
+  if (!existingSheet) {
+    return {
+      status: 'missing_sheet',
+      sheetName: context.sheetName,
+      planMonthName: context.planMonthName,
+      planYear: context.planYear
+    };
+  }
+
+  const previousChoices = getAvailabilitySheetHeaderChoices(context.planYear, context.planMonth, runtimeSettings);
+  const preservedAssignments = captureScheduleAssignments(existingSheet, runtimeSettings.roles);
+
+  setupAvailability(context.sheetName, context.planYear, context.planMonth);
+
+  const rebuiltSheet = ss.getSheetByName(context.sheetName);
+  const restoredAssignments = restoreScheduleAssignments(rebuiltSheet, preservedAssignments, runtimeSettings.roles);
+  const updatedChoices = getAvailabilitySheetHeaderChoices(context.planYear, context.planMonth, runtimeSettings);
+  const previousDateKeys = previousChoices.map(extractDateKey).filter(Boolean);
+  const updatedDateKeys = updatedChoices.map(extractDateKey).filter(Boolean);
+  const addedDates = updatedChoices.filter(choice => previousDateKeys.indexOf(extractDateKey(choice)) === -1);
+  const removedDates = previousChoices.filter(choice => updatedDateKeys.indexOf(extractDateKey(choice)) === -1);
+
+  let formSync = { status: 'skipped' };
+  if (!opts.skipFormSync) {
+    formSync = syncCurrentFormWithAvailability(opts.referenceDate);
+  }
+
+  let availabilityUpdate = { status: 'skipped' };
+  if (!opts.skipMatrixRefresh) {
+    availabilityUpdate = updateAvailability(opts.referenceDate);
+  }
+
+  reorderWorkbookSheets(opts.referenceDate);
+
+  return {
+    status: 'completed',
+    sheetName: context.sheetName,
+    planMonthName: context.planMonthName,
+    planYear: context.planYear,
+    restoredAssignments: restoredAssignments,
+    addedDates: addedDates,
+    removedDates: removedDates,
+    formSync: formSync,
+    availabilityUpdate: availabilityUpdate
+  };
 }
 
 function getAdminReminderPropertyKey(referenceDate) {
@@ -3600,24 +3850,24 @@ function findFormResponseSheet() {
   return null;
 }
 
-function updateAvailability() {
+function updateAvailability(referenceDate) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   syncConfiguredMemberRoles();
   const runtimeSettings = loadRuntimeSettings();
   console.log('--- STARTING updateAvailability ---');
 
-  const today = new Date();
-  const planDate = new Date(today);
-  planDate.setMonth(today.getMonth() + 1);
-  const planMonthName = planDate.toLocaleString('default', { month: 'long' });
-  const sheetName = getAvailabilitySheetNameForMonthName(planMonthName, runtimeSettings);
+  const planningContext = getPlanningMonthContext(referenceDate, runtimeSettings);
+  const sheetName = planningContext.sheetName;
 
   const matrixSheet = ss.getSheetByName(sheetName);
   const databaseSheet = ss.getSheetByName(CONFIG.sheetNames.ministryMembers);
 
   if (!matrixSheet || !databaseSheet) {
     console.log("Error: One or more required sheets are missing.");
-    return;
+    return {
+      status: !matrixSheet ? 'missing_sheet' : 'missing_database',
+      sheetName: sheetName
+    };
   }
 
   const memberColumns = getMinistryMembersColumnMap(databaseSheet);
@@ -3626,14 +3876,14 @@ function updateAvailability() {
 
   if (!databaseData.length) {
     console.log("No data found in the Ministry Members sheet.");
-    return;
+    return { status: 'missing_database_rows', sheetName: sheetName };
   }
 
   // Get Date Headers from the sheet (Row 1, starting from column 2)
   let lastCol = matrixSheet.getLastColumn();
   if (lastCol <= 1) {
     console.log("Error: Availability matrix has no date columns.");
-    return;
+    return { status: 'missing_date_columns', sheetName: sheetName };
   }
   const headerRowValues = matrixSheet.getRange(1, 2, 1, lastCol - 1).getValues();
   let dateHeaders = headerRowValues[0];
@@ -3737,6 +3987,12 @@ function updateAvailability() {
   matrixSheet.autoResizeRows(CONFIG.layout.headerRowIndex, roleRowIndex - CONFIG.layout.headerRowIndex + 1);
   console.log("Availability matrix updated in sheet: " + sheetName);
   console.log('--- FINISHED updateAvailability ---');
+  return {
+    status: 'updated',
+    sheetName: sheetName,
+    roleCount: roleOrder.length,
+    dateCount: serviceDateKeys.length
+  };
 }
 
 /**
