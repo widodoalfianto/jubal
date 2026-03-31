@@ -470,6 +470,64 @@ function runUnitTests() {
   } catch (e) { recordResult('monthlySetup:guardLogic', false, e.message); }
 
   try {
+    const invalidSettingsRows = getDefaultSettingsSheetRows().map(row => row.slice());
+    invalidSettingsRows.forEach(row => {
+      if (row[0] === 'form_creation_day') row[1] = 31;
+      if (row[0] === 'admin_reminder_day') row[1] = 0;
+    });
+    replaceSheetContents(CONFIG.sheetNames.settings, invalidSettingsRows);
+    const clampedSettings = loadRuntimeSettings();
+    assertEqual(clampedSettings.formCreationDay, 28, 'form_creation_day should clamp to 28');
+    assertEqual(clampedSettings.adminReminderDay, 1, 'admin_reminder_day should clamp to 1');
+    recordResult('settings:clampInvalidDays', true, 'Invalid day-of-month settings clamp to the supported 1-28 range');
+  } catch (e) { recordResult('settings:clampInvalidDays', false, e.message); }
+
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const tempSheetName = 'Admins Layout Test';
+    deleteSheetIfExists(tempSheetName);
+    const sheet = ss.insertSheet(tempSheetName);
+    sheet.getRange(1, 1, 3, 4).setValues([
+      ['Enabled', 'Name', 'Email', 'Notes'],
+      [true, 'Widodo', 'widodo@example.com', 'Primary admin'],
+      [false, 'Legacy Name', 'legacy@example.com', '']
+    ]);
+    normalizeAdminsSheetLayout(sheet);
+
+    const headers = sheet.getRange(1, 1, 1, 3).getDisplayValues()[0];
+    if (headers.join('|') !== 'Enabled|Email|Notes') {
+      throw new Error('Admins layout should normalize to Enabled, Email, Notes');
+    }
+    if (sheet.getRange(2, 2).getValue() !== 'widodo@example.com') {
+      throw new Error('Email should remain in the Email column after Admins migration');
+    }
+    if (sheet.getRange(2, 3).getValue() !== 'Primary admin') {
+      throw new Error('Notes should be preserved during Admins migration');
+    }
+    if (sheet.getRange(3, 3).getValue() !== 'Legacy Name') {
+      throw new Error('Legacy Name column should fall back into Notes when Notes is blank');
+    }
+    ss.deleteSheet(sheet);
+    recordResult('admins:normalizeLayout', true, 'Legacy Admins layouts migrate cleanly');
+  } catch (e) {
+    deleteSheetIfExists('Admins Layout Test');
+    recordResult('admins:normalizeLayout', false, e.message);
+  }
+
+  try {
+    const ordered = sortMonthSheetsByRecency([
+      { getName: () => 'January' },
+      { getName: () => 'March' },
+      { getName: () => 'April' },
+      { getName: () => 'May' }
+    ], new Date(2026, 2, 30)).map(sheet => sheet.getName());
+    if (ordered.join('|') !== 'April|May|March|January') {
+      throw new Error('Expected month tabs ordered by nearest upcoming month first, got ' + ordered.join(', '));
+    }
+    recordResult('sheetOrder:monthSorting', true, ordered.join(' -> '));
+  } catch (e) { recordResult('sheetOrder:monthSorting', false, e.message); }
+
+  try {
     deleteSheetIfExists(CONFIG.sheetNames.eventsArchive);
     replaceSheetContents(CONFIG.sheetNames.events, getDefaultEventsSheetRows().concat([
       [true, new Date(2026, 11, 24), 'Christmas Eve', 'ADD', '', true, true, 'Past real event'],
@@ -555,6 +613,9 @@ function runIntegrationTests() {
     if (!dbSheet || dbSheet.getRange(1, memberColumns.canonicalName).getValue() !== CONFIG.sheetHeaders.canonicalName) {
       throw new Error('Canonical Name header missing from Ministry Members');
     }
+    if (memberColumns.canonicalName !== dbSheet.getLastColumn()) {
+      throw new Error('Canonical Name should be the last column in Ministry Members');
+    }
     if (dbSheet.getRange(1, memberColumns.dates).getValue() !== CONFIG.sheetHeaders.dates) {
       throw new Error('Unavailable Dates header missing from Ministry Members');
     }
@@ -566,6 +627,13 @@ function runIntegrationTests() {
     }
     if (dbSheet.getRange(1, getRoleCheckboxStartColumn(dbSheet)).getValue() !== runtimeSettings.roles[0]) {
       throw new Error('Role checkbox headers were not created in Ministry Members');
+    }
+    const firstRoleValidation = dbSheet.getRange(2, getRoleCheckboxStartColumn(dbSheet)).getDataValidation();
+    if (!firstRoleValidation || firstRoleValidation.getCriteriaType() !== SpreadsheetApp.DataValidationCriteria.CHECKBOX) {
+      throw new Error('Role checkbox columns should use checkbox validation');
+    }
+    if (dbSheet.getRange(2, memberColumns.canonicalName).getDataValidation() !== null) {
+      throw new Error('Canonical Name column should not keep checkbox validation');
     }
     if (!dbSheet.getRange(2, memberColumns.roles).getFormula()) {
       throw new Error('Roles formula was not created in Ministry Members');
@@ -581,6 +649,9 @@ function runIntegrationTests() {
     }
     if (!sheetUsesFriendlyAdminsLayout(adminsSheet)) {
       throw new Error('Admins sheet does not use the friendly admin layout');
+    }
+    if (adminsSheet.getRange(1, 1, 1, 3).getDisplayValues()[0].join('|') !== 'Enabled|Email|Notes') {
+      throw new Error('Admins sheet headers should normalize to Enabled, Email, Notes');
     }
     if (!sheetUsesFriendlyRolesLayout(rolesSheet)) {
       throw new Error('Roles sheet does not use the friendly role layout');

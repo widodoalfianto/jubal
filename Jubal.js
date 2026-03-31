@@ -587,7 +587,7 @@ function getMonthSheetSortMetadata(sheetName, referenceDate) {
   }
 
   if (forwardDistance > 0 && forwardDistance <= 6) {
-    return { group: 0, rank: -forwardDistance };
+    return { group: 0, rank: forwardDistance };
   }
 
   return { group: 2, rank: backwardDistance };
@@ -658,6 +658,32 @@ function highlightExampleRows(sheet, notesColumnNumber) {
     const rowNumber = index + 2;
     const isExample = String(value || '').trim().toLowerCase().indexOf('example') === 0;
     const rowRange = sheet.getRange(rowNumber, 1, 1, width);
+    if (isExample) {
+      rowRange
+        .setBackground('#fff2cc')
+        .setFontStyle('italic');
+    } else {
+      rowRange
+        .setBackground(null)
+        .setFontStyle('normal');
+    }
+  });
+}
+
+function highlightAdminRows(sheet, emailColumnNumber, notesColumnNumber) {
+  if (!sheet || sheet.getLastRow() < 2 || sheet.getLastColumn() < 1) return;
+
+  const width = sheet.getLastColumn();
+  const starterEmails = normalizeEmailList(CONFIG.ids.adminEmails || []);
+  const rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, width).getDisplayValues();
+
+  rows.forEach((row, index) => {
+    const rowNumber = index + 2;
+    const email = String(row[emailColumnNumber - 1] || '').trim();
+    const note = String(row[notesColumnNumber - 1] || '').trim().toLowerCase();
+    const isExample = note.indexOf('example') === 0 || starterEmails.indexOf(email) !== -1;
+    const rowRange = sheet.getRange(rowNumber, 1, 1, width);
+
     if (isExample) {
       rowRange
         .setBackground('#fff2cc')
@@ -2222,6 +2248,7 @@ function configureEventsSheetUi(sheet) {
 
 function getAdminsSeedRows(emails) {
   const adminEmails = normalizeEmailList(emails && emails.length ? emails : CONFIG.ids.adminEmails);
+  const starterEmails = normalizeEmailList(CONFIG.ids.adminEmails || []);
   const rows = [
     ['Enabled', 'Email', 'Notes']
   ];
@@ -2231,7 +2258,7 @@ function getAdminsSeedRows(emails) {
       rows.push([
         true,
         email,
-        ''
+        starterEmails.indexOf(email) !== -1 ? 'Example row' : ''
       ]);
     });
   } else {
@@ -2284,7 +2311,7 @@ function configureAdminsSheetUi(sheet) {
   applyCheckboxColumn(sheet, 1, maxRows);
   applyEmailColumn(sheet, 2, maxRows);
   applySheetTheme(sheet);
-  highlightExampleRows(sheet, 3);
+  highlightAdminRows(sheet, 2, 3);
   fitSheetToContent(sheet);
   applyTableBordersToDataRange(sheet);
 }
