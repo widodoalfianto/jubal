@@ -905,6 +905,7 @@ function fitSheetToContent(sheet) {
   const range = sheet.getDataRange();
   range.setWrap(false);
   sheet.autoResizeColumns(1, sheet.getLastColumn());
+  sheet.autoResizeRows(1, sheet.getLastRow());
 }
 
 function applyTableBorder(sheet, startRow, startColumn, numRows, numColumns) {
@@ -2690,7 +2691,7 @@ function renderEventsInstructionBanner(sheet) {
   const width = 5; // J:N
   const titleRow = 2;
   const bodyRow = 3;
-  const bodyHeight = 3;
+  const bodyHeight = 4;
   const lastNeededColumn = startColumn + width - 1;
 
   if (sheet.getMaxColumns() < lastNeededColumn) {
@@ -2739,6 +2740,7 @@ function renderEventsInstructionBanner(sheet) {
 
   applyTableBorder(sheet, titleRow, startColumn, 1, width);
   applyTableBorder(sheet, bodyRow, startColumn, bodyHeight, width);
+  sheet.autoResizeRows(titleRow, bodyHeight + 1);
 }
 
 function applyEventsInstructionRichText(sheet) {
