@@ -618,6 +618,8 @@ function onOpen() {
 
   SpreadsheetApp.getUi()
     .createMenu('Scheduling')
+    .addItem('Initialize Project', 'menuInitializeProject')
+    .addSeparator()
     .addItem('Add Special Event', 'showAddEventDialog')
     .addSeparator()
     .addItem('Apply Event Changes to Next Month', 'menuApplyEventChangesToPlanningMonth')
@@ -854,6 +856,21 @@ function buildMenuAlertLines(result) {
 function showMenuAlert(title, result) {
   const ui = SpreadsheetApp.getUi();
   ui.alert(title, buildMenuAlertLines(result).join('\n\n'), ui.ButtonSet.OK);
+}
+
+function menuInitializeProject() {
+  const ui = SpreadsheetApp.getUi();
+  try {
+    initializeProject();
+    ui.alert(
+      'Project Initialized',
+      'The setup sheets, formatting, and menu configuration have been refreshed.',
+      ui.ButtonSet.OK
+    );
+  } catch (error) {
+    ui.alert('Could Not Initialize Project', error.message, ui.ButtonSet.OK);
+    throw error;
+  }
 }
 
 function menuSyncCurrentFormWithAvailability() {
