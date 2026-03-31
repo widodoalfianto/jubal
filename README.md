@@ -139,9 +139,10 @@ Legacy note:
 Use the `Events` sheet for one-off additions or removals in a specific month. This is the sheet you edit when “this month is different from normal.”
 
 Best admin workflow:
-- use the `Add Special Event` menu option from the spreadsheet menu
+- use the `Add Special Event` menu option from the spreadsheet menu for one-time additions
 - pick the date with the dialog's date field
 - let the script add the row to `Events` for you
+- if you need to cancel or move a recurring date, edit the `Events` sheet directly and use `REMOVE`
 
 Recommended columns:
 - **Enabled**

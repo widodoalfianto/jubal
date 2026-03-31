@@ -116,19 +116,8 @@
     <p class="helper">Use this helper instead of typing directly into the sheet. It writes a clean row into <strong>Events</strong> with a consistent date.</p>
 
     <form id="event-form">
-      <div class="row">
-        <div>
-          <label for="event-date">Date</label>
-          <input id="event-date" name="date" type="date" required>
-        </div>
-        <div>
-          <label for="event-action">Action</label>
-          <select id="event-action" name="action">
-            <option value="ADD">Add event</option>
-            <option value="REMOVE">Remove event</option>
-          </select>
-        </div>
-      </div>
+      <label for="event-date">Date</label>
+      <input id="event-date" name="date" type="date" required>
 
       <label for="event-name">Event Name</label>
       <input id="event-name" name="event" list="common-events" placeholder="Easter, Christmas, Good Friday, Worship Night" required>
@@ -187,7 +176,6 @@
 
         const payload = {
           date: dateInput.value,
-          action: document.getElementById('event-action').value,
           event: document.getElementById('event-name').value,
           recurringEvent: recurringSelect.value,
           includeInForm: document.getElementById('include-in-form').checked,

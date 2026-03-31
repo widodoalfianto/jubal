@@ -614,10 +614,7 @@ function addEventFromDialog(payload) {
     throw new Error('The Events sheet is not ready yet. Please run initializeProject() and try again.');
   }
 
-  const action = String((payload && payload.action) || 'ADD').trim().toUpperCase();
-  if (action !== 'ADD' && action !== 'REMOVE') {
-    throw new Error('Please choose whether this event should be added or removed.');
-  }
+  const action = 'ADD';
 
   const dateValue = String((payload && payload.date) || '').trim();
   const eventName = String((payload && payload.event) || '').trim();
@@ -2717,8 +2714,9 @@ function renderEventsInstructionBanner(sheet) {
   bodyRange
     .merge()
     .setValue(
-      'DOUBLE-CLICK on Date cells to pick dates.\n' +
-      'Use the Add Special Event option in the spreadsheet menu.\n' +
+      'Option 1: DOUBLE-CLICK a Date cell to open the calendar.\n' +
+      'OR\n' +
+      'Option 2: use Add Special Event from the spreadsheet menu.\n' +
       'Use ADD for one-time events and REMOVE to skip one recurring date.'
     )
     .setBackground('#f3f8ee')
@@ -2731,10 +2729,11 @@ function renderEventsInstructionBanner(sheet) {
     .getRange(bodyRow, startColumn)
     .setRichTextValue(
       buildRichTextWithBoldPhrases(
-        'DOUBLE-CLICK on Date cells to pick dates.\n' +
-        'Use the Add Special Event option in the spreadsheet menu.\n' +
+        'Option 1: DOUBLE-CLICK a Date cell to open the calendar.\n' +
+        'OR\n' +
+        'Option 2: use Add Special Event from the spreadsheet menu.\n' +
         'Use ADD for one-time events and REMOVE to skip one recurring date.',
-        ['DOUBLE-CLICK', 'Date']
+        ['DOUBLE-CLICK', 'Date', 'OR', 'Add Special Event']
       )
     );
 
@@ -2748,7 +2747,7 @@ function applyEventsInstructionRichText(sheet) {
   notesValues.forEach((value, index) => {
     const text = String(value || '');
     if (text.indexOf('DOUBLE-CLICK') === -1) return;
-    sheet.getRange(index + 2, 8).setRichTextValue(buildRichTextWithBoldPhrases(text, ['DOUBLE-CLICK', 'Date']));
+    sheet.getRange(index + 2, 8).setRichTextValue(buildRichTextWithBoldPhrases(text, ['DOUBLE-CLICK', 'Date', 'OR', 'Add Special Event']));
   });
 }
 
@@ -2927,7 +2926,7 @@ function getEventsSeedRows() {
   const exampleDates = getUpcomingSpecialEventExampleDates();
   return [
     ['Enabled', 'Date', 'Event', 'Action', 'Recurring Event', 'Include In Form', 'Include In Schedule', 'Notes'],
-    [false, exampleDates.easter, 'Easter', 'ADD', '', true, true, 'Example row - DOUBLE-CLICK on Date cells to pick dates'],
+    [false, exampleDates.easter, 'Easter', 'ADD', '', true, true, 'Example row - DOUBLE-CLICK a Date cell OR use Add Special Event'],
     [false, exampleDates.goodFriday, 'Good Friday', 'ADD', '', true, true, 'Example row - dated special events like Good Friday belong in Events.'],
     [false, exampleDates.christmas, 'Christmas', 'ADD', '', true, true, 'Example row - dated special events like Christmas belong in Events.'],
     [false, exampleDates.goodFriday, 'Corporate Prayer', 'REMOVE', 'Corporate Prayer', true, true, 'Example row - use REMOVE when a recurring event should not happen on one date.']
