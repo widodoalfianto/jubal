@@ -2345,6 +2345,23 @@ function styleConfigHeader(sheet, backgrounds) {
   range.setFontWeight('bold');
 }
 
+function buildRichTextWithBoldPhrases(text, phrases) {
+  const value = String(text || '');
+  const builder = SpreadsheetApp.newRichTextValue().setText(value);
+  const boldStyle = SpreadsheetApp.newTextStyle().setBold(true).build();
+
+  (phrases || []).forEach(phrase => {
+    if (!phrase) return;
+    let startIndex = value.indexOf(phrase);
+    while (startIndex !== -1) {
+      builder.setTextStyle(startIndex, startIndex + phrase.length, boldStyle);
+      startIndex = value.indexOf(phrase, startIndex + phrase.length);
+    }
+  });
+
+  return builder.build();
+}
+
 function getRecurringEventDropdownValues() {
   const sheet = getConfiguredRecurringSheet();
   if (!sheet || sheet.getLastRow() < 2) return [];
@@ -2450,8 +2467,8 @@ function renderEventsInstructionBanner(sheet) {
   bodyRange
     .merge()
     .setValue(
+      'DOUBLE-CLICK on Date cells to pick dates.\n' +
       'Use the Add Special Event option in the spreadsheet menu.\n' +
-      'If you edit directly in this sheet, double-click a Date cell to open the calendar.\n' +
       'Use ADD for one-time events and REMOVE to skip one recurring date.'
     )
     .setBackground('#f3f8ee')
@@ -2460,8 +2477,29 @@ function renderEventsInstructionBanner(sheet) {
     .setHorizontalAlignment('left')
     .setWrap(true);
 
+  sheet
+    .getRange(bodyRow, startColumn)
+    .setRichTextValue(
+      buildRichTextWithBoldPhrases(
+        'DOUBLE-CLICK on Date cells to pick dates.\n' +
+        'Use the Add Special Event option in the spreadsheet menu.\n' +
+        'Use ADD for one-time events and REMOVE to skip one recurring date.',
+        ['DOUBLE-CLICK', 'Date']
+      )
+    );
+
   applyTableBorder(sheet, titleRow, startColumn, 1, width);
   applyTableBorder(sheet, bodyRow, startColumn, bodyHeight, width);
+}
+
+function applyEventsInstructionRichText(sheet) {
+  if (!sheet || sheet.getLastRow() < 2) return;
+  const notesValues = sheet.getRange(2, 8, sheet.getLastRow() - 1, 1).getDisplayValues().flat();
+  notesValues.forEach((value, index) => {
+    const text = String(value || '');
+    if (text.indexOf('DOUBLE-CLICK') === -1) return;
+    sheet.getRange(index + 2, 8).setRichTextValue(buildRichTextWithBoldPhrases(text, ['DOUBLE-CLICK', 'Date']));
+  });
 }
 
 function configureEventsSheetUi(sheet) {
@@ -2492,6 +2530,7 @@ function configureEventsSheetUi(sheet) {
   sheet.getRange(1, 2).setBackground('#9fc5e8');
   sheet.getRange(2, 2, maxRows, 1).setBackground('#eef4ff');
   highlightExampleRows(sheet, 8);
+  applyEventsInstructionRichText(sheet);
   fitSheetToContent(sheet);
   applyTableBorder(sheet, 1, 1, sheet.getLastRow(), 8);
   renderEventsInstructionBanner(sheet);
@@ -2638,8 +2677,8 @@ function getEventsSeedRows() {
   const exampleDates = getUpcomingSpecialEventExampleDates();
   return [
     ['Enabled', 'Date', 'Event', 'Action', 'Recurring Event', 'Include In Form', 'Include In Schedule', 'Notes'],
-    [false, exampleDates.goodFriday, 'Good Friday', 'ADD', '', true, true, 'Example row - easiest method: use the Add Special Event menu option. If you edit directly in the sheet, double-click the Date cell to open the picker.'],
-    [false, exampleDates.easter, 'Easter', 'ADD', '', true, true, 'Example row - dated special events like Easter belong in Events.'],
+    [false, exampleDates.easter, 'Easter', 'ADD', '', true, true, 'Example row - DOUBLE-CLICK on Date cells to pick dates'],
+    [false, exampleDates.goodFriday, 'Good Friday', 'ADD', '', true, true, 'Example row - dated special events like Good Friday belong in Events.'],
     [false, exampleDates.christmas, 'Christmas', 'ADD', '', true, true, 'Example row - dated special events like Christmas belong in Events.'],
     [false, exampleDates.goodFriday, 'Corporate Prayer', 'REMOVE', 'Corporate Prayer', true, true, 'Example row - use REMOVE when a recurring event should not happen on one date.']
   ];
