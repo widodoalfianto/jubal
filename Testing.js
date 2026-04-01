@@ -7,6 +7,8 @@
  * Usage: Run runFullSystemTest() from the Apps Script editor.
  */
 
+const TEST_PIPELINE_ADMIN_EMAIL = 'widodoalfianto94@gmail.com';
+
 function runFullSystemTest() {
   console.log("🧪 STARTING FULL SYSTEM TEST");
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -768,6 +770,14 @@ function runIntegrationTests() {
     recordResult('migrateMemberRolesToCheckboxes:smoke', true, JSON.stringify(result));
   } catch (e) { recordResult('migrateMemberRolesToCheckboxes:smoke', false, e.message); }
 
+  try {
+    const roleLifecycle = exerciseRoleColumnLifecycle('integration_test_role');
+    if (!roleLifecycle.added || !roleLifecycle.removed) {
+      throw new Error('Role lifecycle helper should confirm both column creation and removal');
+    }
+    recordResult('roles:columnLifecycle', true, JSON.stringify(roleLifecycle));
+  } catch (e) { recordResult('roles:columnLifecycle', false, e.message); }
+
   // test: ensureMonthlyEventsFor remains usable for legacy installs
   try {
     deleteSheetIfExists(CONFIG.sheetNames.events);
@@ -942,6 +952,245 @@ function ensureTestMemberExists(name, role) {
   }
   ensureRolesFormulaForRow(sheet, rowNumber, loadRuntimeSettings().roles);
   return rowNumber;
+}
+
+function getTestingMonthNames() {
+  return ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+}
+
+function isGeneratedPlanningSheetName(sheetName) {
+  const name = String(sheetName || '').trim();
+  if (!name) return false;
+  if (name.indexOf(' (Staging)') !== -1) {
+    return getTestingMonthNames().indexOf(name.replace(/\s+\(Staging\)$/, '')) !== -1;
+  }
+  return getTestingMonthNames().indexOf(name) !== -1;
+}
+
+function getBlankMinistryMembersRows() {
+  return [
+    getMinistryMembersHeaderRow().concat([CONFIG.sheetHeaders.canonicalName])
+  ];
+}
+
+function getScenarioSettingsRows(churchName) {
+  const rows = getSettingsSeedRows().map(row => row.slice());
+  rows.forEach(row => {
+    if (row[0] === 'church_name') row[1] = churchName;
+  });
+  return rows;
+}
+
+function getScenarioAdminsRows() {
+  const rows = getAdminsSeedRows([TEST_PIPELINE_ADMIN_EMAIL]).map(row => row.slice());
+  for (let i = 1; i < rows.length; i++) {
+    const email = String(rows[i][1] || '').trim().toLowerCase();
+    if (email === TEST_PIPELINE_ADMIN_EMAIL.toLowerCase()) {
+      rows[i][0] = true;
+      rows[i][2] = 'Primary test admin';
+    }
+  }
+  return rows;
+}
+
+function getScenarioRolesRows(roles) {
+  return getRolesSeedRows(roles).map(row => row.slice());
+}
+
+function getScenarioRecurringRows(includeCorporatePrayer) {
+  const rows = getRecurringSeedRows().map(row => row.slice());
+  rows.forEach(row => {
+    if (String(row[1] || '').trim() === 'Corporate Prayer') {
+      row[0] = !!includeCorporatePrayer;
+      row[7] = includeCorporatePrayer
+        ? 'Enabled for full pipeline testing'
+        : 'Disabled for minimal pipeline testing';
+    }
+  });
+  return rows;
+}
+
+function getScenarioEventsRows(referenceDate, eventName) {
+  const rows = getEventsSeedRows().map(row => row.slice());
+  const baseDate = referenceDate ? new Date(referenceDate) : new Date();
+  const planDate = new Date(baseDate);
+  planDate.setMonth(planDate.getMonth() + 1);
+  const specialEventDate = new Date(planDate.getFullYear(), planDate.getMonth(), 15);
+
+  rows.push([true, specialEventDate, eventName, 'ADD', '', true, true, 'Scenario special event']);
+  return rows;
+}
+
+function exerciseRoleColumnLifecycle(tempRoleName) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const rolesSheet = ss.getSheetByName(CONFIG.sheetNames.rolesConfig);
+  const membersSheet = ss.getSheetByName(CONFIG.sheetNames.ministryMembers);
+  if (!rolesSheet || !membersSheet) {
+    throw new Error('Roles and Ministry Members sheets are required before testing role lifecycle.');
+  }
+
+  const tempRole = String(tempRoleName || 'TEMP_TEST_ROLE').trim().toUpperCase();
+  const originalRows = rolesSheet.getDataRange().getValues().map(row => row.slice());
+  const addedRows = originalRows.concat([[true, tempRole, 'Temporary role lifecycle test']]);
+
+  replaceSheetContents(CONFIG.sheetNames.rolesConfig, addedRows);
+  configureRolesSheetUi(ss.getSheetByName(CONFIG.sheetNames.rolesConfig));
+  syncConfiguredMemberRoles();
+
+  const afterAddMap = getConfiguredMemberRoleColumnMap(membersSheet);
+  if (!afterAddMap[tempRole]) {
+    throw new Error(`Expected role column '${tempRole}' to appear in Ministry Members after adding it.`);
+  }
+
+  const removedRows = addedRows.filter((row, index) => index === 0 || String(row[1] || '').trim().toUpperCase() !== tempRole);
+  replaceSheetContents(CONFIG.sheetNames.rolesConfig, removedRows);
+  configureRolesSheetUi(ss.getSheetByName(CONFIG.sheetNames.rolesConfig));
+  syncConfiguredMemberRoles();
+
+  const afterRemoveMap = getConfiguredMemberRoleColumnMap(membersSheet);
+  if (afterRemoveMap[tempRole]) {
+    throw new Error(`Expected role column '${tempRole}' to disappear from Ministry Members after deleting it.`);
+  }
+
+  return {
+    role: tempRole,
+    added: true,
+    removed: true
+  };
+}
+
+function resetProject() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const summary = {
+    status: 'reset',
+    deletedSheets: [],
+    skippedSheets: [],
+    trashedForms: [],
+    skippedForms: []
+  };
+
+  const metadataSheet = ss.getSheetByName(CONFIG.sheetNames.formMetadata);
+  const trackedFormIds = getTrackedFormIds(metadataSheet);
+  unlinkTrackedForms(trackedFormIds);
+
+  trackedFormIds.forEach(formId => {
+    try {
+      DriveApp.getFileById(formId).setTrashed(true);
+      summary.trashedForms.push(formId);
+    } catch (error) {
+      summary.skippedForms.push({
+        formId: formId,
+        reason: error.message
+      });
+    }
+  });
+
+  ss.getSheets().slice().forEach(sheet => {
+    const name = sheet.getName();
+    const shouldDelete = name.startsWith('Form Responses') ||
+      isGeneratedPlanningSheetName(name) ||
+      name === 'Test Results' ||
+      name === 'Execution Logs' ||
+      name === 'Debug Responses' ||
+      name === CONFIG.sheetNames.eventsArchive ||
+      name === CONFIG.sheetNames.reconciliation;
+
+    if (!shouldDelete) return;
+
+    try {
+      ss.deleteSheet(sheet);
+      summary.deletedSheets.push(name);
+    } catch (error) {
+      summary.skippedSheets.push({
+        sheetName: name,
+        reason: error.message
+      });
+    }
+  });
+
+  replaceSheetContents(CONFIG.sheetNames.ministryMembers, getBlankMinistryMembersRows());
+  replaceSheetContents(CONFIG.sheetNames.formMetadata, [['Form Name', 'Form ID']]);
+  replaceSheetContents(CONFIG.sheetNames.settings, getSettingsSeedRows());
+  replaceSheetContents(CONFIG.sheetNames.admins, getAdminsSeedRows([]));
+  replaceSheetContents(CONFIG.sheetNames.rolesConfig, getRolesSeedRows(CONFIG.roles));
+  replaceSheetContents(CONFIG.sheetNames.recurring, getRecurringSeedRows());
+  replaceSheetContents(CONFIG.sheetNames.events, getEventsSeedRows());
+
+  initializeProject();
+  return summary;
+}
+
+function runPipelineScenario(options) {
+  const opts = options || {};
+  const scenarioName = String(opts.name || 'Test Scenario').trim();
+  const includeCorporatePrayer = !!opts.includeCorporatePrayer;
+  const specialEventName = String(opts.specialEventName || 'Scenario Special Event').trim();
+  const roles = (opts.roles || CONFIG.roles).slice();
+  const referenceDate = opts.referenceDate ? new Date(opts.referenceDate) : new Date();
+
+  const resetSummary = resetProject();
+  replaceSheetContents(CONFIG.sheetNames.settings, getScenarioSettingsRows(scenarioName));
+  replaceSheetContents(CONFIG.sheetNames.admins, getScenarioAdminsRows());
+  replaceSheetContents(CONFIG.sheetNames.rolesConfig, getScenarioRolesRows(roles));
+  replaceSheetContents(CONFIG.sheetNames.recurring, getScenarioRecurringRows(includeCorporatePrayer));
+  replaceSheetContents(CONFIG.sheetNames.events, getScenarioEventsRows(referenceDate, specialEventName));
+
+  initializeProject();
+  const roleLifecycle = exerciseRoleColumnLifecycle(`${scenarioName.replace(/\s+/g, '_').toUpperCase()}_TEMP`);
+
+  roles.slice(0, Math.min(roles.length, 3)).forEach((role, index) => {
+    ensureTestMemberExists(`${scenarioName} Member ${index + 1}`, role);
+  });
+
+  const runtimeSettings = loadRuntimeSettings();
+  const planningContext = getPlanningMonthContext(referenceDate, runtimeSettings);
+  const triggerSync = syncAutomationTriggers();
+  const monthlySetupResult = runMonthlySetupInternal({ force: true, referenceDate: referenceDate });
+  const headerChoices = getAvailabilitySheetHeaderChoices(planningContext.planYear, planningContext.planMonth, runtimeSettings);
+
+  if (!headerChoices.some(choice => choice.indexOf(specialEventName) !== -1)) {
+    throw new Error(`Expected '${specialEventName}' to appear in the ${planningContext.sheetName} sheet.`);
+  }
+
+  const hasCorporatePrayer = headerChoices.some(choice => choice.indexOf('Corporate Prayer') !== -1);
+  if (includeCorporatePrayer && !hasCorporatePrayer) {
+    throw new Error('Expected Corporate Prayer to appear in the full scenario.');
+  }
+  if (!includeCorporatePrayer && hasCorporatePrayer) {
+    throw new Error('Corporate Prayer should stay off in the minimal scenario.');
+  }
+
+  return {
+    scenario: scenarioName,
+    adminEmail: TEST_PIPELINE_ADMIN_EMAIL,
+    churchName: runtimeSettings.churchName,
+    specialEventName: specialEventName,
+    includeCorporatePrayer: includeCorporatePrayer,
+    planningSheet: planningContext.sheetName,
+    resetSummary: resetSummary,
+    triggerSync: triggerSync,
+    roleLifecycle: roleLifecycle,
+    monthlySetup: monthlySetupResult,
+    headerChoices: headerChoices
+  };
+}
+
+function testMinimal() {
+  return runPipelineScenario({
+    name: 'Test Minimal',
+    includeCorporatePrayer: false,
+    specialEventName: 'Test Special Event',
+    roles: ['WL', 'SINGER', 'DRUMS']
+  });
+}
+
+function testFull() {
+  return runPipelineScenario({
+    name: 'Test Full',
+    includeCorporatePrayer: true,
+    specialEventName: 'Full Team Worship Night',
+    roles: ['WL', 'SINGER', 'ACOUSTIC', 'KEYBOARD', 'EG', 'BASS', 'DRUMS']
+  });
 }
 
 function getDefaultSettingsSheetRows() {

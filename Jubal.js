@@ -798,6 +798,39 @@ function ensureRoleCheckboxColumns(sheet, roles) {
   }
 }
 
+function pruneRoleCheckboxColumns(sheet, roles) {
+  if (!sheet) return [];
+
+  const desiredRoles = {};
+  (roles || []).forEach(role => {
+    const normalized = String(role || '').trim().toUpperCase();
+    if (normalized) desiredRoles[normalized] = true;
+  });
+
+  const memberColumns = getMinistryMembersColumnMap(sheet);
+  const startColumn = getRoleCheckboxStartColumn(sheet);
+  const endColumn = Math.min(sheet.getLastColumn(), memberColumns.canonicalName - 1);
+  const width = endColumn - startColumn + 1;
+  if (width <= 0) return [];
+
+  const headers = sheet.getRange(1, startColumn, 1, width).getDisplayValues()[0];
+  const columnsToDelete = [];
+  const removedHeaders = [];
+
+  headers.forEach((header, index) => {
+    const normalized = String(header || '').trim().toUpperCase();
+    if (!normalized || desiredRoles[normalized]) return;
+    columnsToDelete.push(startColumn + index);
+    removedHeaders.push(String(header || '').trim());
+  });
+
+  columnsToDelete
+    .sort((a, b) => b - a)
+    .forEach(columnNumber => sheet.deleteColumn(columnNumber));
+
+  return removedHeaders;
+}
+
 function normalizeMinistryMembersColumnValidation(sheet, roles) {
   if (!sheet || sheet.getMaxRows() < 2) return;
 
@@ -882,6 +915,7 @@ function ensureRolesFormulaColumn(sheet, roles) {
 
 function configureMinistryMembersRoles(sheet, roles) {
   if (!sheet || !roles || !roles.length) return;
+  const removedRoles = pruneRoleCheckboxColumns(sheet, roles);
   ensureRoleCheckboxColumns(sheet, roles);
   normalizeMinistryMembersColumnValidation(sheet, roles);
   syncRoleCheckboxesFromRolesColumn(sheet, roles);
@@ -889,6 +923,9 @@ function configureMinistryMembersRoles(sheet, roles) {
   applySheetTheme(sheet);
   fitSheetToContent(sheet);
   applyTableBordersToDataRange(sheet);
+  return {
+    removedRoles: removedRoles
+  };
 }
 
 function hasRoleCheckboxColumnsConfigured(sheet, roles) {
@@ -964,26 +1001,28 @@ function migrateMemberRolesToCheckboxes() {
   if (!roles.length) throw new Error(`No roles configured in ${CONFIG.sheetNames.rolesConfig}.`);
 
   if (hasRoleCheckboxColumnsConfigured(sheet, roles)) {
-    configureMinistryMembersRoles(sheet, roles);
+    const configureResult = configureMinistryMembersRoles(sheet, roles);
     SpreadsheetApp.flush();
     console.log('Role checkbox migration skipped because the sheet is already configured.');
     return {
       status: 'already_configured',
       roles: roles,
       startColumn: columnToLetter(getRoleCheckboxStartColumn(sheet)),
+      removedRoles: configureResult && configureResult.removedRoles ? configureResult.removedRoles : [],
       migratedRows: 0,
       memberRows: Math.max(sheet.getLastRow() - 1, 0)
     };
   }
 
   if (hasAnyRoleCheckboxHeaders(sheet)) {
-    configureMinistryMembersRoles(sheet, roles);
+    const configureResult = configureMinistryMembersRoles(sheet, roles);
     SpreadsheetApp.flush();
     console.log('Role checkbox columns refreshed from the Roles sheet.');
     return {
       status: 'updated_roles',
       roles: roles,
       startColumn: columnToLetter(getRoleCheckboxStartColumn(sheet)),
+      removedRoles: configureResult && configureResult.removedRoles ? configureResult.removedRoles : [],
       migratedRows: 0,
       memberRows: Math.max(sheet.getLastRow() - 1, 0)
     };
@@ -997,7 +1036,7 @@ function migrateMemberRolesToCheckboxes() {
     );
   }
 
-  configureMinistryMembersRoles(sheet, roles);
+  const configureResult = configureMinistryMembersRoles(sheet, roles);
   SpreadsheetApp.flush();
 
   console.log(
@@ -1009,6 +1048,7 @@ function migrateMemberRolesToCheckboxes() {
     status: 'migrated',
     roles: roles,
     startColumn: columnToLetter(getRoleCheckboxStartColumn(sheet)),
+    removedRoles: configureResult && configureResult.removedRoles ? configureResult.removedRoles : [],
     migratedRows: summary.rowsWithLegacyRoles,
     memberRows: summary.memberRows
   };
