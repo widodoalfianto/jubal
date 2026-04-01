@@ -486,6 +486,10 @@ function unlinkTrackedForms(formIds) {
 function deleteFormResponseSheetsById(ss, sheetIds) {
   const spreadsheet = ss || SpreadsheetApp.getActiveSpreadsheet();
   const targetIds = {};
+  const result = {
+    deleted: [],
+    skipped: []
+  };
   (sheetIds || []).forEach(sheetId => {
     targetIds[String(sheetId)] = true;
   });
@@ -498,10 +502,22 @@ function deleteFormResponseSheetsById(ss, sheetIds) {
     try {
       spreadsheet.deleteSheet(sheet);
       console.log("Deleted old Form Responses tab: " + toDelete);
+      result.deleted.push(toDelete);
     } catch (e) {
-      console.log("Skipped deleting Form Responses tab '" + toDelete + "': " + e.message);
+      const reason = e && e.message ? e.message : 'Unknown error';
+      const likelyCause = reason.indexOf('linked form') !== -1
+        ? 'This response sheet is probably still linked to an older Google Form that is no longer tracked in Form Metadata.'
+        : '';
+      console.log("Skipped deleting Form Responses tab '" + toDelete + "': " + reason);
+      result.skipped.push({
+        sheetName: toDelete,
+        reason: reason,
+        likelyCause: likelyCause
+      });
     }
   });
+
+  return result;
 }
 
 function deleteFormResponseSheets(ss) {
@@ -1112,6 +1128,7 @@ function runMonthlySetupInternal(options) {
   const stagingSheetName = `${newTabName} (Staging)`;
   let preparedForm = null;
   let setupCommitted = false;
+  let formResponseCleanup = { deleted: [], skipped: [] };
 
   if (!opts.force && ss.getSheetByName(newTabName)) {
     throw new Error(`The ${newTabName} sheet already exists. Please review it before running monthlySetup again.`);
@@ -1154,7 +1171,7 @@ function runMonthlySetupInternal(options) {
     writeCurrentFormMetadata(metadataSheet, preparedForm.metadataLabel, preparedForm.formId);
 
     unlinkTrackedForms(trackedFormIds);
-    deleteFormResponseSheetsById(ss, existingResponseSheetIds);
+    formResponseCleanup = deleteFormResponseSheetsById(ss, existingResponseSheetIds);
 
     const oldSheet = ss.getSheetByName(deleteTabName);
     if (oldSheet) {
@@ -1195,7 +1212,8 @@ function runMonthlySetupInternal(options) {
     key: propertyKey,
     planMonthName: planMonthName,
     planYear: planYear,
-    planMonth: planMonth + 1
+    planMonth: planMonth + 1,
+    formResponseCleanup: formResponseCleanup
   };
 }
 
