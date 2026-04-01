@@ -454,6 +454,21 @@ function renderEventsInstructionBanner(sheet) {
   sheet.autoResizeRows(titleRow, bodyHeight + 1);
 }
 
+function clearEventsInstructionBanner(sheet) {
+  if (!sheet) return;
+
+  const startColumn = 10;
+  const width = 5;
+  const titleRow = 2;
+  const bodyRow = 3;
+  const bodyHeight = 4;
+
+  if (sheet.getMaxColumns() < startColumn + width - 1) return;
+
+  sheet.getRange(titleRow, startColumn, 1, width).breakApart();
+  sheet.getRange(bodyRow, startColumn, bodyHeight, width).breakApart();
+}
+
 function applyEventsInstructionRichText(sheet) {
   if (!sheet || sheet.getLastRow() < 2) return;
   const notesValues = sheet.getRange(2, 8, sheet.getLastRow() - 1, 1).getDisplayValues().flat();

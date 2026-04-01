@@ -1155,7 +1155,7 @@ function clearByHeader(header) {
   }
   
   // Clear the contents of the column, starting from row 2
-  sheet.getRange(2, colIndex, lastRow - 1).clearContent();
+  sheet.getRange(2, colIndex, lastRow - 1, 1).clearContent();
   
   console.log(header + ' column cleared.');
 }
@@ -1302,13 +1302,17 @@ function runMonthlySetupInternal(options) {
     }
     stagingSheet.setName(newTabName);
 
+    console.log('Clearing monthly member-entry columns in Ministry Members');
     clearByHeader(CONFIG.sheetHeaders.times);
     clearByHeader(CONFIG.sheetHeaders.dates);
     clearByHeader(CONFIG.sheetHeaders.comments);
 
+    console.log('Writing current form metadata');
     writeCurrentFormMetadata(metadataSheet, preparedForm.metadataLabel, preparedForm.formId);
 
+    console.log('Unlinking tracked historical forms');
     unlinkTrackedForms(trackedFormIds);
+    console.log('Cleaning up old Form Responses sheets');
     formResponseCleanup = deleteFormResponseSheetsById(ss, existingResponseSheetIds);
 
     const oldSheet = ss.getSheetByName(deleteTabName);

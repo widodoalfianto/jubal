@@ -108,6 +108,8 @@ function insertDialogEventRow(eventsSheet, row) {
     throw new Error('The Events sheet was not found.');
   }
 
+  clearEventsInstructionBanner(eventsSheet);
+
   const lastColumn = Math.max(eventsSheet.getLastColumn(), row.length);
   const lastRow = Math.max(eventsSheet.getLastRow(), 1);
 
