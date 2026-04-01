@@ -123,11 +123,6 @@
       <input id="event-name" name="event" list="common-events" placeholder="Easter, Christmas, Good Friday, Worship Night" required>
       <datalist id="common-events"></datalist>
 
-      <label for="recurring-event">Recurring Event</label>
-      <select id="recurring-event" name="recurringEvent">
-        <option value="">None</option>
-      </select>
-
       <div class="checks">
         <label><input id="include-in-form" name="includeInForm" type="checkbox" checked> Include in form</label>
         <label><input id="include-in-schedule" name="includeInSchedule" type="checkbox" checked> Include in schedule</label>
@@ -148,7 +143,6 @@
       const context = JSON.parse(<?= dialogContext ?>);
       const dateInput = document.getElementById('event-date');
       const commonEvents = document.getElementById('common-events');
-      const recurringSelect = document.getElementById('recurring-event');
       const form = document.getElementById('event-form');
       const status = document.getElementById('status');
       const submitButton = document.getElementById('submit-button');
@@ -161,13 +155,6 @@
         commonEvents.appendChild(option);
       });
 
-      (context.recurringEvents || []).forEach(value => {
-        const option = document.createElement('option');
-        option.value = value;
-        option.textContent = value;
-        recurringSelect.appendChild(option);
-      });
-
       form.addEventListener('submit', event => {
         event.preventDefault();
         status.style.display = 'none';
@@ -177,7 +164,6 @@
         const payload = {
           date: dateInput.value,
           event: document.getElementById('event-name').value,
-          recurringEvent: recurringSelect.value,
           includeInForm: document.getElementById('include-in-form').checked,
           includeInSchedule: document.getElementById('include-in-schedule').checked,
           notes: document.getElementById('event-notes').value

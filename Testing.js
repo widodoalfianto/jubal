@@ -838,6 +838,31 @@ function runIntegrationTests() {
 
     recordResult('applyEventChangesToPlanningMonth:preserveAssignments', true, JSON.stringify(result));
   } catch (e) { recordResult('applyEventChangesToPlanningMonth:preserveAssignments', false, e.message); }
+
+  // test: special event dialog inserts new rows below example rows instead of appending to the bottom
+  try {
+    replaceSheetContents(CONFIG.sheetNames.events, getDefaultEventsSheetRows());
+    configureEventsSheetUi(ss.getSheetByName(CONFIG.sheetNames.events));
+
+    const result = addEventFromDialog({
+      date: '2026-04-18',
+      event: 'Retreat Night',
+      includeInForm: true,
+      includeInSchedule: true,
+      notes: 'Added from test'
+    });
+
+    const eventsSheet = ss.getSheetByName(CONFIG.sheetNames.events);
+    const insertedEvent = eventsSheet.getRange(result.rowIndex, 3).getDisplayValue();
+    if (result.rowIndex !== 6) {
+      throw new Error(`Expected dialog row to be inserted immediately below examples at row 6, found row ${result.rowIndex}`);
+    }
+    if (insertedEvent !== 'Retreat Night') {
+      throw new Error(`Expected inserted event name at row ${result.rowIndex}, found '${insertedEvent}'`);
+    }
+
+    recordResult('addEventFromDialog:insertBelowExamples', true, JSON.stringify(result));
+  } catch (e) { recordResult('addEventFromDialog:insertBelowExamples', false, e.message); }
 }
 
 function resetTestResultsSheet() {

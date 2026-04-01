@@ -34,7 +34,6 @@ function getAddEventDialogContext() {
 
   return {
     today: Utilities.formatDate(today, runtimeSettings.timeZone || safeGetScriptTimeZone(), 'yyyy-MM-dd'),
-    recurringEvents: recurringEvents,
     commonEvents: mergedCommonEvents
   };
 }
@@ -68,7 +67,6 @@ function addEventFromDialog(payload) {
 
   const dateValue = String((payload && payload.date) || '').trim();
   const eventName = String((payload && payload.event) || '').trim();
-  const recurringEvent = String((payload && payload.recurringEvent) || '').trim();
   const notes = String((payload && payload.notes) || '').trim();
   const parsedDate = parseSingleDate(dateValue);
 
@@ -84,16 +82,14 @@ function addEventFromDialog(payload) {
     parsedDate,
     eventName,
     action,
-    recurringEvent,
+    '',
     parseBooleanLike(payload && payload.includeInForm, true),
     parseBooleanLike(payload && payload.includeInSchedule, true),
     notes
   ];
 
-  eventsSheet.appendRow(row);
+  const rowIndex = insertDialogEventRow(eventsSheet, row);
   configureEventsSheetUi(eventsSheet);
-
-  const rowIndex = eventsSheet.getLastRow();
   const endColumnLetter = columnToLetter(eventsSheet.getLastColumn());
   const rowRange = eventsSheet.getRange(rowIndex, 1, 1, eventsSheet.getLastColumn());
   ss.setActiveSheet(eventsSheet);
@@ -105,6 +101,59 @@ function addEventFromDialog(payload) {
     dateDisplay: Utilities.formatDate(parsedDate, safeGetScriptTimeZone(), 'EEE, MMM d, yyyy'),
     sheetUrl: getSheetRangeUrl(eventsSheet, rowIndex, 'A', endColumnLetter)
   };
+}
+
+function insertDialogEventRow(eventsSheet, row) {
+  if (!eventsSheet) {
+    throw new Error('The Events sheet was not found.');
+  }
+
+  const lastColumn = Math.max(eventsSheet.getLastColumn(), row.length);
+  const lastRow = Math.max(eventsSheet.getLastRow(), 1);
+
+  if (lastColumn > eventsSheet.getMaxColumns()) {
+    eventsSheet.insertColumnsAfter(eventsSheet.getMaxColumns(), lastColumn - eventsSheet.getMaxColumns());
+  }
+
+  if (lastRow < 2) {
+    if (eventsSheet.getMaxRows() < 2) {
+      eventsSheet.insertRowsAfter(eventsSheet.getMaxRows(), 2 - eventsSheet.getMaxRows());
+    }
+    eventsSheet.getRange(2, 1, 1, row.length).setValues([row]);
+    return 2;
+  }
+
+  const dataRowCount = Math.max(lastRow - 1, 0);
+  const rows = dataRowCount
+    ? eventsSheet.getRange(2, 1, dataRowCount, lastColumn).getValues()
+    : [];
+  const headerValues = eventsSheet.getRange(1, 1, 1, lastColumn).getDisplayValues()[0];
+  const headerMap = buildHeaderMap(headerValues);
+
+  let insertionRow = 2;
+  for (let index = 0; index < rows.length; index++) {
+    const currentRow = rows[index];
+    if (isBlankRow(currentRow)) {
+      insertionRow = index + 2;
+      break;
+    }
+    if (!isExampleEventsRow(currentRow, headerMap)) {
+      insertionRow = index + 2;
+      break;
+    }
+    insertionRow = index + 3;
+  }
+
+  if (insertionRow > lastRow + 1) insertionRow = lastRow + 1;
+
+  if (insertionRow <= lastRow) {
+    eventsSheet.insertRowsBefore(insertionRow, 1);
+  } else if (eventsSheet.getMaxRows() < insertionRow) {
+    eventsSheet.insertRowsAfter(eventsSheet.getMaxRows(), insertionRow - eventsSheet.getMaxRows());
+  }
+
+  eventsSheet.getRange(insertionRow, 1, 1, row.length).setValues([row]);
+  return insertionRow;
 }
 
 function getPlanningMonthContext(referenceDate, settings) {
