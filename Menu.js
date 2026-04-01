@@ -20,6 +20,8 @@ function onOpen() {
     .addItem('Apply Event Changes to Next Month', 'menuApplyEventChangesToPlanningMonth')
     .addItem('Refresh Form Dates', 'menuSyncCurrentFormWithAvailability')
     .addItem('Refresh Availability Sheet', 'menuUpdateAvailability')
+    .addSeparator()
+    .addItem('Sync Automation Triggers', 'menuSyncAutomationTriggers')
     .addToUi();
 }
 
@@ -300,6 +302,34 @@ function menuApplyEventChangesToPlanningMonth() {
     return result;
   } catch (error) {
     ui.alert('Could Not Apply Event Changes', error.message, ui.ButtonSet.OK);
+    throw error;
+  }
+}
+
+function menuSyncAutomationTriggers() {
+  const ui = SpreadsheetApp.getUi();
+  try {
+    const result = syncAutomationTriggers();
+    const createdCount = result && result.created ? result.created.length : 0;
+    const removedCount = result && result.removed ? result.removed.length : 0;
+    const createdHandlers = (result && result.created ? result.created : [])
+      .map(item => item.handler)
+      .join(', ');
+
+    const lines = [
+      'Automation triggers were refreshed for this spreadsheet.',
+      `${createdCount} trigger(s) created.`,
+      `${removedCount} older managed trigger(s) removed.`
+    ];
+
+    if (createdHandlers) {
+      lines.push(`Current managed triggers: ${createdHandlers}.`);
+    }
+
+    ui.alert('Automation Triggers Synced', lines.join('\n\n'), ui.ButtonSet.OK);
+    return result;
+  } catch (error) {
+    ui.alert('Could Not Sync Automation Triggers', error.message, ui.ButtonSet.OK);
     throw error;
   }
 }
