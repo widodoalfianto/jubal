@@ -41,8 +41,14 @@ jobs:
       - name: Syntax check
         run: |
           node --check Config.js
+          node --check Diagnostics.js
+          node --check Emails.js
+          node --check Events.js
           node --check Jubal.js
+          node --check Menu.js
           node --check Testing.js
+          node --check Utils.js
+          node --check Workbook.js
           node --check scripts/run_tests.js
           node --check scripts/tenant_matrix.js
 
@@ -156,6 +162,9 @@ jobs:
 
       - name: Push project to Apps Script
         run: clasp --auth "$RUNNER_TEMP/.clasprc.json" push --force
+
+      - name: Sync automation triggers
+        run: clasp --auth "$RUNNER_TEMP/.clasprc.json" run syncAutomationTriggers
 
       - name: Create deployment version (best-effort)
         env:
@@ -331,6 +340,9 @@ jobs:
 
       - name: Push project to Apps Script
         run: clasp --auth "$RUNNER_TEMP/.clasprc.json" push --force
+
+      - name: Sync automation triggers
+        run: clasp --auth "$RUNNER_TEMP/.clasprc.json" run syncAutomationTriggers
 
       - name: Create deployment version (best-effort)
         env:

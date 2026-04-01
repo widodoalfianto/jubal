@@ -55,16 +55,18 @@ Update the `CONFIG` object with your specific details:
 8. `Ministry Members` is ordered for daily admin use: `Name`, `Unavailable Dates`, `Times Willing To Serve`, `Comments`, `Roles`, then role checkboxes, with `Canonical Name` kept as the last column.
 
 ### 4. Triggers
-Set up the automation triggers in the Apps Script dashboard (Clock icon on the left):
-1. **Monthly Form Creation**:
-   - Function: `monthlySetup` | Event Source: `Time-driven` | Type: `Day timer`
-   - This can run daily. The script only performs the monthly setup when today's date matches `form_creation_day`.
+If you deploy through the GitHub Actions pipeline, the automation triggers are synced automatically after each deploy by running `syncAutomationTriggers()`.
+
+If you are installing or repairing a spreadsheet manually, run `syncAutomationTriggers()` once from the Apps Script editor. It will ensure these trigger types exist:
+1. **Daily Automation Scheduler**:
+   - Function: `runDailyAutomation` | Event Source: `Time-driven` | Type: `Day timer`
+   - This runs daily and calls both:
+     - `sendAdminPlanningReminderIfDue()`
+     - `monthlySetup()`
+   - Both functions still use their own in-code day guards, so the scheduler is safe to run every day.
 2. **Database Update**:
-   - Function: `onFormSubmit` | Event Source: `From spreadsheet` | Event Type: `On form submit`.
-3. **Admin Reminder Check**:
-   - Function: `sendAdminPlanningReminderIfDue` | Event Source: `Time-driven` | Type: `Day timer`
-   - This can run daily. The script only sends a reminder when the date matches your `admin_reminder_day` setting.
-4. **Manual Override**:
+   - Function: `onFormSubmit` | Event Source: `From spreadsheet` | Event Type: `On form submit`
+3. **Manual Override**:
    - If you need to run the monthly setup immediately from the editor, use `runMonthlySetupNow()`.
 
 ---

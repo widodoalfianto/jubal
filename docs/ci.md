@@ -81,11 +81,15 @@ Workflow behavior
   - validate the repo layout and tenant registry
   - build the `dev` tenant matrix from `deploy/tenants.json`
   - deploy to all `dev` tenants
+  - run `syncAutomationTriggers()` via `clasp run` so installable triggers stay in sync
   - run `runAllTests()` via `clasp run` against tenants with `runRemoteTests: true`
 - On manual `workflow_dispatch` with `deploy_stage=dev`:
-  - deploy to `dev` tenants and run remote tests
+  - deploy to `dev` tenants
+  - run `syncAutomationTriggers()` for each tenant
+  - run remote tests
 - On manual `workflow_dispatch` with `deploy_stage=prod`:
   - deploy to all `prod` tenants in the registry
+  - run `syncAutomationTriggers()` for each tenant
 - If `clasp deploy` is not configured or fails, the workflow still pushes files with `clasp push`.
 
 Checklist before running the workflow
@@ -99,6 +103,12 @@ Checklist before running the workflow
   - `dev`
   - `prod`
   - Use required reviewers on `prod` before allowing production deploys.
+- For remote `clasp run` steps, each tenant script also needs:
+  - an API Executable deployment
+  - `executionApi` configured in `appsscript.json`
+- That matters for both:
+  - `syncAutomationTriggers()`
+  - `runAllTests()`
 - For remote `clasp run` tests, each dev script also needs:
   - an API Executable deployment
   - `executionApi` configured in `appsscript.json`
@@ -167,6 +177,16 @@ clasp run runAllTests
 
 Notes:
 - `clasp run` requires an API Executable deployment and `executionApi` in `appsscript.json`.
+- The same requirement now applies to CI trigger sync, because deploy jobs call `syncAutomationTriggers()` after each `clasp push`.
 - Only point remote tests at `dev` tenants or spreadsheet copies. `runAllTests()` modifies sheets and forms.
+
+Trigger model
+- `syncAutomationTriggers()` now ensures only these managed installable triggers exist:
+  - spreadsheet submit trigger for `onFormSubmit`
+  - one daily clock trigger for `runDailyAutomation`
+- `runDailyAutomation()` then calls:
+  - `sendAdminPlanningReminderIfDue()`
+  - `monthlySetup()`
+- This keeps the trigger surface small while still letting both functions use sheet-driven day guards.
 
 The older `scripts/run_tests.js` helper uses a service account and is no longer used by CI.

@@ -26,6 +26,143 @@ function onFormSubmit(e) {
   updateDatabase(e);
 }
 
+function getManagedAutomationTriggerSpecs(spreadsheet) {
+  const ss = spreadsheet || SpreadsheetApp.getActiveSpreadsheet();
+  if (!ss) {
+    throw new Error('No active spreadsheet was found. Trigger sync must run from the bound spreadsheet project.');
+  }
+
+  return [
+    {
+      key: 'form_submit',
+      handler: 'onFormSubmit',
+      source: ScriptApp.TriggerSource.SPREADSHEETS,
+      eventType: ScriptApp.EventType.ON_FORM_SUBMIT,
+      create: function () {
+        return ScriptApp.newTrigger('onFormSubmit')
+          .forSpreadsheet(ss)
+          .onFormSubmit()
+          .create();
+      },
+      description: 'Spreadsheet form submit trigger'
+    },
+    {
+      key: 'daily_automation',
+      handler: 'runDailyAutomation',
+      source: ScriptApp.TriggerSource.CLOCK,
+      eventType: ScriptApp.EventType.CLOCK,
+      create: function () {
+        return ScriptApp.newTrigger('runDailyAutomation')
+          .timeBased()
+          .everyDays(1)
+          .atHour(9)
+          .create();
+      },
+      description: 'Daily automation scheduler trigger'
+    }
+  ];
+}
+
+function getLegacyManagedAutomationTriggerSpecs() {
+  return [
+    {
+      handler: 'monthlySetup',
+      source: ScriptApp.TriggerSource.CLOCK,
+      eventType: ScriptApp.EventType.CLOCK,
+      description: 'Legacy daily monthly setup guard trigger'
+    },
+    {
+      handler: 'sendAdminPlanningReminderIfDue',
+      source: ScriptApp.TriggerSource.CLOCK,
+      eventType: ScriptApp.EventType.CLOCK,
+      description: 'Legacy daily admin reminder guard trigger'
+    }
+  ];
+}
+
+function triggerMatchesManagedSpec(trigger, spec) {
+  if (!trigger || !spec) return false;
+
+  return trigger.getHandlerFunction() === spec.handler &&
+    trigger.getTriggerSource() === spec.source &&
+    trigger.getEventType() === spec.eventType;
+}
+
+function syncAutomationTriggers() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  if (!ss) {
+    throw new Error('No active spreadsheet was found. Trigger sync must run from the bound spreadsheet project.');
+  }
+
+  const existingTriggers = ScriptApp.getProjectTriggers();
+  const specs = getManagedAutomationTriggerSpecs(ss);
+  const cleanupSpecs = specs.concat(getLegacyManagedAutomationTriggerSpecs());
+  const result = {
+    status: 'synced',
+    spreadsheetId: ss.getId(),
+    spreadsheetName: ss.getName(),
+    removed: [],
+    created: []
+  };
+
+  existingTriggers
+    .filter(trigger => cleanupSpecs.some(spec => triggerMatchesManagedSpec(trigger, spec)))
+    .forEach(trigger => {
+      const matchedSpec = cleanupSpecs.find(spec => triggerMatchesManagedSpec(trigger, spec));
+      ScriptApp.deleteTrigger(trigger);
+      result.removed.push({
+        handler: matchedSpec ? matchedSpec.handler : trigger.getHandlerFunction(),
+        description: matchedSpec ? matchedSpec.description : 'Removed managed trigger'
+      });
+    });
+
+  specs.forEach(spec => {
+    spec.create();
+    result.created.push({
+      handler: spec.handler,
+      description: spec.description
+    });
+  });
+
+  console.log('Synced automation triggers: ' + JSON.stringify(result));
+  return result;
+}
+
+function runDailyAutomation() {
+  const result = {
+    status: 'completed',
+    reminder: null,
+    monthlySetup: null
+  };
+  const errors = [];
+
+  try {
+    result.reminder = sendAdminPlanningReminderIfDue();
+  } catch (error) {
+    const message = error && error.message ? error.message : String(error);
+    console.error('Daily automation reminder step failed: ' + message);
+    result.reminder = { status: 'failed', message: message };
+    errors.push('reminder: ' + message);
+  }
+
+  try {
+    result.monthlySetup = monthlySetup();
+  } catch (error) {
+    const message = error && error.message ? error.message : String(error);
+    console.error('Daily automation monthly setup step failed: ' + message);
+    result.monthlySetup = { status: 'failed', message: message };
+    errors.push('monthlySetup: ' + message);
+  }
+
+  if (errors.length) {
+    result.status = 'completed_with_errors';
+    throw new Error('Daily automation finished with errors. ' + errors.join(' | '));
+  }
+
+  console.log('Daily automation completed: ' + JSON.stringify(result));
+  return result;
+}
+
 function getMinistryMembersColumnMap(sheet) {
   const defaults = {
     name: 1,
@@ -1129,6 +1266,7 @@ function runMonthlySetupInternal(options) {
   let preparedForm = null;
   let setupCommitted = false;
   let formResponseCleanup = { deleted: [], skipped: [] };
+  let emailResult = { status: 'skipped' };
 
   if (!opts.force && ss.getSheetByName(newTabName)) {
     throw new Error(`The ${newTabName} sheet already exists. Please review it before running monthlySetup again.`);
@@ -1188,9 +1326,13 @@ function runMonthlySetupInternal(options) {
   }
 
   try {
-    sendNewFormCreatedEmail(planMonthName, preparedForm.responderUrl, preparedForm.editUrl, runtimeSettings);
+    emailResult = sendNewFormCreatedEmail(planMonthName, preparedForm.responderUrl, preparedForm.editUrl, runtimeSettings);
   } catch (error) {
     console.error('Failed to send new form email: ' + error.message);
+    emailResult = {
+      status: 'failed',
+      message: error.message
+    };
   }
   console.log(`Created new form for ${planMonthName}`);
 
@@ -1213,7 +1355,8 @@ function runMonthlySetupInternal(options) {
     planMonthName: planMonthName,
     planYear: planYear,
     planMonth: planMonth + 1,
-    formResponseCleanup: formResponseCleanup
+    formResponseCleanup: formResponseCleanup,
+    emailResult: emailResult
   };
 }
 

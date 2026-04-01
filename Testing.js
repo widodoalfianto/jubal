@@ -480,8 +480,19 @@ function runUnitTests() {
     if (getMonthlySetupPropertyKey(new Date(2026, 2, 8)) !== 'monthlySetupCompleted:2026-04') {
       throw new Error('Monthly setup property key should target the next month');
     }
-    recordResult('monthlySetup:guardLogic', true, 'Daily trigger guard uses form_creation_day and next-month keys');
+    recordResult('monthlySetup:guardLogic', true, 'Daily automation guard uses form_creation_day and next-month keys');
   } catch (e) { recordResult('monthlySetup:guardLogic', false, e.message); }
+
+  try {
+    const specs = getManagedAutomationTriggerSpecs({});
+    const handlers = specs.map(spec => spec.handler).sort();
+    assertEqual(handlers.join(','), 'onFormSubmit,runDailyAutomation', 'managed trigger handlers');
+    const dailyAutomationSpec = specs.find(spec => spec.handler === 'runDailyAutomation');
+    if (!dailyAutomationSpec) {
+      throw new Error('Managed triggers should include runDailyAutomation');
+    }
+    recordResult('automationTriggers:specs', true, 'Managed trigger sync uses one daily scheduler plus the spreadsheet submit trigger');
+  } catch (e) { recordResult('automationTriggers:specs', false, e.message); }
 
   try {
     const invalidSettingsRows = getDefaultSettingsSheetRows().map(row => row.slice());
@@ -913,7 +924,7 @@ function getDefaultSettingsSheetRows() {
     ['Key', 'Value', 'Notes'],
     ['church_name', CONFIG.defaults.churchName, 'Used in form titles and notifications'],
     ['time_zone', safeGetScriptTimeZone(), 'Time zone used for event generation and reminder emails'],
-    ['form_creation_day', CONFIG.defaults.formCreationDay, 'Day of month when the daily monthlySetup trigger should create the next month form and availability sheet.'],
+    ['form_creation_day', CONFIG.defaults.formCreationDay, 'Day of month when the daily automation scheduler should create the next month form and availability sheet.'],
     ['admin_reminder_enabled', CONFIG.defaults.adminReminderEnabled, 'TRUE or FALSE. When TRUE, send planning reminders to admins.'],
     ['admin_reminder_day', CONFIG.defaults.adminReminderDay, 'Day of month to send the admin planning reminder for next month.'],
     ['times_choices', CONFIG.defaults.timesChoices.join(','), 'Choices shown in the form question for how many times someone is willing to serve this month.'],

@@ -144,7 +144,14 @@ function sendNewFormCreatedEmail(monthName, responderUrl, editUrl, settings) {
                   'If you need to edit the form, use the following link:\n' + editUrl + '\n\n' +
                   'Please submit your availability as soon as possible.';
 
-  sendEmailToAdmins(emailSubject, emailBody, runtimeSettings);
+  const sent = sendEmailToAdmins(emailSubject, emailBody, runtimeSettings);
+  if (sent) {
+    console.log(`Sent new form email for ${monthName} to admin recipients.`);
+    return { status: 'sent', monthName: monthName };
+  }
+
+  console.log(`Skipped new form email for ${monthName} because no enabled admin email recipients were configured.`);
+  return { status: 'no_recipients', monthName: monthName };
 }
 
 function getAdminReminderPropertyKey(referenceDate) {

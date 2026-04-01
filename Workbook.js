@@ -670,7 +670,7 @@ function getSettingsSeedRows() {
     ['Key', 'Value', 'Notes'],
     ['church_name', CONFIG.defaults.churchName, 'Used in form titles and notifications'],
     ['time_zone', safeGetScriptTimeZone(), 'Time zone used for event generation and reminder emails'],
-    ['form_creation_day', CONFIG.defaults.formCreationDay, 'Day of month when the daily monthlySetup trigger should create the next month form and availability sheet.'],
+    ['form_creation_day', CONFIG.defaults.formCreationDay, 'Day of month when the daily automation scheduler should create the next month form and availability sheet.'],
     ['admin_reminder_enabled', CONFIG.defaults.adminReminderEnabled, 'TRUE or FALSE. When TRUE, send planning reminders to admins.'],
     ['admin_reminder_day', CONFIG.defaults.adminReminderDay, 'Day of month to send the admin planning reminder for next month.'],
     ['times_choices', CONFIG.defaults.timesChoices.join(','), 'Choices shown in the form question for how many times someone is willing to serve this month.'],
