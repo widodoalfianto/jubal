@@ -1100,6 +1100,9 @@ function resetProject() {
 
   const metadataSheet = ss.getSheetByName(CONFIG.sheetNames.formMetadata);
   const trackedFormIds = getTrackedFormIds(metadataSheet);
+  const responseSheetIds = ss.getSheets()
+    .filter(sheet => sheet.getName().startsWith('Form Responses'))
+    .map(sheet => sheet.getSheetId());
   console.log(`resetProject: unlinking ${trackedFormIds.length} tracked form(s)`);
   unlinkTrackedForms(trackedFormIds);
 
@@ -1116,10 +1119,18 @@ function resetProject() {
     }
   });
 
+  console.log(`resetProject: deleting ${responseSheetIds.length} Form Responses sheet(s)`);
+  const responseCleanup = deleteFormResponseSheetsById(ss, responseSheetIds);
+  summary.deletedSheets = summary.deletedSheets.concat(responseCleanup.deleted || []);
+  summary.skippedSheets = summary.skippedSheets.concat((responseCleanup.skipped || []).map(item => ({
+    sheetName: item.sheetName,
+    reason: item.reason,
+    likelyCause: item.likelyCause || ''
+  })));
+
   ss.getSheets().slice().forEach(sheet => {
     const name = sheet.getName();
-    const shouldDelete = name.startsWith('Form Responses') ||
-      isGeneratedPlanningSheetName(name) ||
+    const shouldDelete = isGeneratedPlanningSheetName(name) ||
       name === 'Test Results' ||
       name === 'Execution Logs' ||
       name === 'Debug Responses' ||
