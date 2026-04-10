@@ -109,6 +109,37 @@
       .status.success {
         color: #137333;
       }
+
+      .status.loading {
+        color: #1a73e8;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .spinner {
+        width: 14px;
+        height: 14px;
+        border: 2px solid #d2e3fc;
+        border-top-color: #1a73e8;
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+        flex: 0 0 auto;
+      }
+
+      button:disabled {
+        opacity: 0.7;
+        cursor: wait;
+      }
+
+      @keyframes spin {
+        from {
+          transform: rotate(0deg);
+        }
+        to {
+          transform: rotate(360deg);
+        }
+      }
     </style>
   </head>
   <body>
@@ -146,6 +177,8 @@
       const form = document.getElementById('event-form');
       const status = document.getElementById('status');
       const submitButton = document.getElementById('submit-button');
+      const cancelButton = form.querySelector('button.secondary');
+      const initialSubmitLabel = submitButton.textContent;
 
       dateInput.value = context.today || '';
 
@@ -155,11 +188,18 @@
         commonEvents.appendChild(option);
       });
 
+      function setSubmittingState(isSubmitting) {
+        submitButton.disabled = isSubmitting;
+        cancelButton.disabled = isSubmitting;
+        submitButton.textContent = isSubmitting ? 'Saving...' : initialSubmitLabel;
+      }
+
       form.addEventListener('submit', event => {
         event.preventDefault();
-        status.style.display = 'none';
-        status.className = 'status';
-        submitButton.disabled = true;
+        status.style.display = 'block';
+        status.className = 'status loading';
+        status.innerHTML = '<span class="spinner" aria-hidden="true"></span><span>Saving to Events...</span>';
+        setSubmittingState(true);
 
         const payload = {
           date: dateInput.value,
@@ -174,13 +214,13 @@
             status.style.display = 'block';
             status.className = 'status success';
             status.innerHTML = 'Saved <strong>' + result.eventName + '</strong> for ' + result.dateDisplay + '.<br><a href="' + result.sheetUrl + '" target="_blank">Open row in Events</a>';
-            submitButton.disabled = false;
+            setSubmittingState(false);
           })
           .withFailureHandler(error => {
             status.style.display = 'block';
             status.className = 'status error';
             status.textContent = error && error.message ? error.message : String(error);
-            submitButton.disabled = false;
+            setSubmittingState(false);
           })
           .addEventFromDialog(payload);
       });
