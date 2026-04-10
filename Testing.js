@@ -917,6 +917,35 @@ function replaceSheetContents(sheetName, rows) {
   return sheet;
 }
 
+function recreateSheetWithRows(sheetName, rows) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const existing = ss.getSheetByName(sheetName);
+  let tempSheet = null;
+
+  if (existing && ss.getSheets().length === 1) {
+    tempSheet = ss.insertSheet('_Reset Temp');
+  }
+
+  if (existing) {
+    ss.deleteSheet(existing);
+  }
+
+  const sheet = ss.insertSheet(sheetName);
+  if (rows && rows.length) {
+    sheet.getRange(1, 1, rows.length, rows[0].length).setValues(rows);
+  }
+
+  if (tempSheet) {
+    try {
+      ss.deleteSheet(tempSheet);
+    } catch (error) {
+      console.warn('Could not delete temporary reset sheet: ' + error.message);
+    }
+  }
+
+  return sheet;
+}
+
 function deleteSheetIfExists(sheetName) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName(sheetName);
@@ -1071,10 +1100,12 @@ function resetProject() {
 
   const metadataSheet = ss.getSheetByName(CONFIG.sheetNames.formMetadata);
   const trackedFormIds = getTrackedFormIds(metadataSheet);
+  console.log(`resetProject: unlinking ${trackedFormIds.length} tracked form(s)`);
   unlinkTrackedForms(trackedFormIds);
 
   trackedFormIds.forEach(formId => {
     try {
+      console.log(`resetProject: trashing form ${formId}`);
       DriveApp.getFileById(formId).setTrashed(true);
       summary.trashedForms.push(formId);
     } catch (error) {
@@ -1098,6 +1129,7 @@ function resetProject() {
     if (!shouldDelete) return;
 
     try {
+      console.log(`resetProject: deleting sheet ${name}`);
       ss.deleteSheet(sheet);
       summary.deletedSheets.push(name);
     } catch (error) {
@@ -1108,15 +1140,18 @@ function resetProject() {
     }
   });
 
-  replaceSheetContents(CONFIG.sheetNames.ministryMembers, getBlankMinistryMembersRows());
-  replaceSheetContents(CONFIG.sheetNames.formMetadata, [['Form Name', 'Form ID']]);
-  replaceSheetContents(CONFIG.sheetNames.settings, getSettingsSeedRows());
-  replaceSheetContents(CONFIG.sheetNames.admins, getAdminsSeedRows([]));
-  replaceSheetContents(CONFIG.sheetNames.rolesConfig, getRolesSeedRows(CONFIG.roles));
-  replaceSheetContents(CONFIG.sheetNames.recurring, getRecurringSeedRows());
-  replaceSheetContents(CONFIG.sheetNames.events, getEventsSeedRows());
+  console.log('resetProject: recreating core setup sheets');
+  recreateSheetWithRows(CONFIG.sheetNames.ministryMembers, getBlankMinistryMembersRows());
+  recreateSheetWithRows(CONFIG.sheetNames.formMetadata, [['Form Name', 'Form ID']]);
+  recreateSheetWithRows(CONFIG.sheetNames.settings, getSettingsSeedRows());
+  recreateSheetWithRows(CONFIG.sheetNames.admins, getAdminsSeedRows([]));
+  recreateSheetWithRows(CONFIG.sheetNames.rolesConfig, getRolesSeedRows(CONFIG.roles));
+  recreateSheetWithRows(CONFIG.sheetNames.recurring, getRecurringSeedRows());
+  recreateSheetWithRows(CONFIG.sheetNames.events, getEventsSeedRows());
 
+  console.log('resetProject: running initializeProject');
   initializeProject();
+  console.log('resetProject: complete');
   return summary;
 }
 
